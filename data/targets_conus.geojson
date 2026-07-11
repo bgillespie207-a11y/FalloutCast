@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "meta": {
+    "description": "Illustrative set of well-known, publicly documented US strategic installations, for civil-defense-style fallout modeling (where does fallout go over CONUS). Coordinates are approximate and drawn from public sources. This is NOT a targeting product.",
+    "source": "public/open",
+    "assumed_burst": "surface"
+  },
+  "features": [
+    {"type": "Feature", "properties": {"name": "F.E. Warren AFB (90th MW, Minuteman III)", "category": "icbm_field", "note": "WY/NE/CO missile field"}, "geometry": {"type": "Point", "coordinates": [-104.82, 41.14]}},
+    {"type": "Feature", "properties": {"name": "Malmstrom AFB (341st MW, Minuteman III)", "category": "icbm_field", "note": "central Montana missile field"}, "geometry": {"type": "Point", "coordinates": [-111.19, 47.50]}},
+    {"type": "Feature", "properties": {"name": "Minot AFB (91st MW, Minuteman III + bombers)", "category": "icbm_field", "note": "North Dakota missile field and B-52 base"}, "geometry": {"type": "Point", "coordinates": [-101.36, 48.42]}},
+    {"type": "Feature", "properties": {"name": "USSTRATCOM / Offutt AFB", "category": "command", "note": "strategic command"}, "geometry": {"type": "Point", "coordinates": [-95.91, 41.12]}},
+    {"type": "Feature", "properties": {"name": "Naval Base Kitsap-Bangor (SSBN)", "category": "ssbn_base", "note": "Pacific ballistic-missile submarine base"}, "geometry": {"type": "Point", "coordinates": [-122.71, 47.72]}},
+    {"type": "Feature", "properties": {"name": "Naval Submarine Base Kings Bay (SSBN)", "category": "ssbn_base", "note": "Atlantic ballistic-missile submarine base"}, "geometry": {"type": "Point", "coordinates": [-81.51, 30.80]}},
+    {"type": "Feature", "properties": {"name": "Barksdale AFB (2nd BW, B-52)", "category": "bomber_base", "note": "Louisiana bomber base"}, "geometry": {"type": "Point", "coordinates": [-93.66, 32.50]}},
+    {"type": "Feature", "properties": {"name": "Whiteman AFB (509th BW, B-2)", "category": "bomber_base", "note": "Missouri stealth-bomber base"}, "geometry": {"type": "Point", "coordinates": [-93.55, 38.73]}},
+    {"type": "Feature", "properties": {"name": "Kirtland AFB / nuclear stockpile", "category": "storage", "note": "New Mexico weapons storage complex"}, "geometry": {"type": "Point", "coordinates": [-106.56, 35.05]}},
+    {"type": "Feature", "properties": {"name": "Pantex Plant", "category": "storage", "note": "Texas weapons assembly/disassembly"}, "geometry": {"type": "Point", "coordinates": [-101.56, 35.31]}}
+  ]
+}

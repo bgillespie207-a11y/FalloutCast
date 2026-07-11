@@ -1,0 +1,272 @@
+"""FalloutCast API.
+
+Endpoints
+---------
+GET  /health           liveness
+GET  /targets          public CONUS strategic-site set
+POST /plume            single-detonation fallout contours
+POST /exchange         multi-target overlay (v1: per-target plumes composited
+                       as overlaid contours; a true national max-envelope grid
+                       is a roadmap item -- see docs/PRD.md)
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException
+
+from .. import contour, grid, targets as targets_mod
+from ..physics import decay, ensemble
+from ..physics import tier1
+from ..physics.wseg10 import WSEG10, cloud_top_height_m
+from ..schemas import (
+    DISCLAIMER,
+    DoseRequest,
+    DoseResponse,
+    DoseSample,
+    EnsembleRequest,
+    EnsembleResponse,
+    PlumeRequest,
+    PlumeResponse,
+    Target,
+    WindUsed,
+)
+from ..weather import openmeteo
+
+app = FastAPI(
+    title="FalloutCast",
+    version="0.2.0",
+    summary="Weather-driven nuclear fallout visualization (WSEG-10 + multi-layer).",
+)
+
+
+async def _resolve_wind(req: PlumeRequest) -> WindUsed:
+    if req.wind is not None:
+        return WindUsed(
+            speed_mph=req.wind.speed_mph,
+            bearing_deg=req.wind.bearing_deg,
+            shear_mph_per_kft=req.wind.shear_mph_per_kft,
+            source="manual",
+        )
+    profile = await openmeteo.fetch_profile(req.lat, req.lon)
+    eff = openmeteo.reduce_profile(profile, cloud_top_height_m(req.yield_mt))
+    return WindUsed(
+        speed_mph=eff.speed_mph,
+        bearing_deg=eff.bearing_deg,
+        shear_mph_per_kft=eff.shear_mph_per_kft,
+        source="open-meteo-gfs",
+    )
+
+
+def _tier0_contours(req: PlumeRequest, wind: WindUsed) -> dict:
+    model = WSEG10(
+        yield_mt=req.yield_mt,
+        fission_fraction=req.fission_fraction,
+        wind_mph=wind.speed_mph,
+        wind_dir_deg=wind.bearing_deg,
+        shear_mph_per_kft=wind.shear_mph_per_kft,
+    )
+    g = grid.sample(model)
+    levels = tuple(req.levels_rhr) if req.levels_rhr else contour.DEFAULT_LEVELS
+    return contour.to_geojson(g, lat0=req.lat, lon0=req.lon, levels=levels)
+
+
+def _tier1_contours(req: PlumeRequest, profile) -> tuple[dict, float]:
+    heights, u, v = openmeteo.profile_uv(profile)
+    result = tier1.simulate(
+        yield_mt=req.yield_mt,
+        fission_fraction=req.fission_fraction,
+        heights_m=heights,
+        wind_u_ms=u,
+        wind_v_ms=v,
+    )
+    dose_grid = grid.DoseGrid(
+        x_miles=result.x_miles,
+        y_miles=result.y_miles,
+        dose_rate_h1=result.dose_rate_h1,
+    )
+    levels = tuple(req.levels_rhr) if req.levels_rhr else contour.DEFAULT_LEVELS
+    gj = contour.to_geojson(dose_grid, lat0=req.lat, lon0=req.lon, levels=levels)
+    return gj, result.fraction_aloft
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "models": ["wseg10", "tier1"], "tiers": [0, 1]}
+
+
+@app.get("/targets", response_model=list[Target])
+def get_targets() -> list[Target]:
+    return targets_mod.load_targets()
+
+
+@app.post("/dose", response_model=DoseResponse)
+def dose(req: DoseRequest) -> DoseResponse:
+    """Time-evolution of exposure at a point via Way-Wigner (t^-1.2) decay.
+
+    Given the H+1 reference dose rate, returns the decaying rate at requested
+    times, the accumulated dose over a shelter window, and the total dose if
+    exposed from arrival onward.
+    """
+    default_times = [1, 2, 6, 12, 24, 48, 168]
+    times = req.times_hours or default_times
+    times = [t for t in times if t >= req.arrival_hours]
+
+    curve = [
+        DoseSample(t_hours=t, dose_rate_rhr=float(decay.dose_rate_at(req.dose_rate_h1, t)))
+        for t in times
+    ]
+
+    accumulated = None
+    notes: list[str] = []
+    if req.exit_hours is not None:
+        if req.exit_hours <= req.arrival_hours:
+            raise HTTPException(status_code=422, detail="exit_hours must exceed arrival_hours")
+        accumulated = float(
+            decay.accumulated_dose(req.dose_rate_h1, req.arrival_hours, req.exit_hours)
+        )
+
+    total_inf = float(decay.accumulated_dose_to_infinity(req.dose_rate_h1, req.arrival_hours))
+    notes.append(
+        "Dose in roentgens (~rem whole-body). Decay assumes no weathering or "
+        "shielding; divide by a protection factor for sheltered exposure."
+    )
+    return DoseResponse(
+        rate_curve=curve,
+        accumulated_dose_r=accumulated,
+        total_to_infinity_r=total_inf,
+        notes=notes,
+    )
+
+
+@app.post("/ensemble", response_model=EnsembleResponse)
+async def ensemble_band(req: EnsembleRequest) -> EnsembleResponse:
+    """Ensemble uncertainty band: probability that H+1 dose rate exceeds a level.
+
+    Runs Tier-1 across perturbed wind members and contours the exceedance
+    probability at 10/50/90%. The outer band is where fallout could reach; the
+    inner is where it very likely will. This is the antidote to a single crisp
+    (and false-confident) plume line.
+    """
+    try:
+        profile = await openmeteo.fetch_profile(req.lat, req.lon)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc}")
+
+    heights, u, v = openmeteo.profile_uv(profile)
+    members = ensemble.perturb_profile(u, v, n_members=req.n_members)
+    res = ensemble.run_ensemble(
+        yield_mt=req.yield_mt, fission_fraction=req.fission_fraction,
+        heights_m=heights, members=members, levels_rhr=(req.level_rhr,),
+    )
+
+    prob_field = res.prob_by_level[req.level_rhr]
+    prob_grid = grid.DoseGrid(
+        x_miles=res.x_miles, y_miles=res.y_miles, dose_rate_h1=prob_field
+    )
+    gj = contour.to_geojson(
+        prob_grid, lat0=req.lat, lon0=req.lon, levels=ensemble.DEFAULT_PROB_LEVELS
+    )
+    # relabel the contour property: it's a probability, not a dose rate
+    for f in gj["features"]:
+        f["properties"] = {"exceedance_probability": f["properties"].pop("dose_rate_h1_rhr")}
+
+    notes = [
+        f"Bands are P(H+1 dose rate >= {req.level_rhr:g} R/hr) at 10/50/90% across "
+        f"{res.n_members} wind members.",
+        "Members are perturbations of the deterministic forecast; swapping in "
+        "Open-Meteo ensemble members is a fetch-layer change.",
+    ]
+    return EnsembleResponse(
+        ground_zero=[req.lon, req.lat], level_rhr=req.level_rhr,
+        n_members=res.n_members, mean_fraction_aloft=res.mean_fraction_aloft,
+        disclaimer=DISCLAIMER, notes=notes, contours=gj,
+    )
+
+
+@app.post("/plume", response_model=PlumeResponse)
+async def plume(req: PlumeRequest) -> PlumeResponse:
+    if not req.surface_burst:
+        raise HTTPException(
+            status_code=422,
+            detail="WSEG-10 fallout modeling assumes a surface burst; air bursts "
+            "produce negligible local fallout and are out of scope.",
+        )
+
+    notes: list[str] = []
+
+    # Tier-1 needs a full vertical wind profile. A manual single-vector wind
+    # cannot drive it, so we honor the request by downgrading to Tier-0 and say
+    # so plainly -- never silently, never with an error.
+    if req.tier == 1 and req.wind is not None:
+        notes.append(
+            "Tier-1 requires a fetched vertical wind profile; a manual single "
+            "wind vector has no shear to advect through. Downgraded to Tier-0."
+        )
+        wind = await _resolve_wind(req)
+        contours = _tier0_contours(req, wind)
+        return PlumeResponse(
+            ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=0,
+            wind=wind, disclaimer=DISCLAIMER, notes=notes, contours=contours,
+        )
+
+    if req.tier == 1:
+        try:
+            profile = await openmeteo.fetch_profile(req.lat, req.lon)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc}")
+        contours, aloft = _tier1_contours(req, profile)
+        if aloft > 0.05:
+            notes.append(
+                f"{aloft:.0%} of activity is still airborne at 24 h (fine particles "
+                "carried to regional/global scale, beyond this local footprint)."
+            )
+        return PlumeResponse(
+            ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=1,
+            wind=WindUsed(source="open-meteo-gfs-profile"),
+            disclaimer=DISCLAIMER, notes=notes, fraction_aloft=aloft,
+            contours=contours,
+        )
+
+    # Tier-0
+    try:
+        wind = await _resolve_wind(req)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc}")
+    contours = _tier0_contours(req, wind)
+    return PlumeResponse(
+        ground_zero=[req.lon, req.lat], tier_requested=0, tier_used=0,
+        wind=wind, disclaimer=DISCLAIMER, notes=notes, contours=contours,
+    )
+
+
+@app.post("/exchange")
+async def exchange(yield_mt: float = 0.3, fission_fraction: float = 0.5) -> dict:
+    """Overlay fallout from the full public target set under current winds.
+
+    v1 semantics: each target is modeled independently with its own local wind
+    and the resulting contour sets are returned together (one FeatureCollection
+    per target). This is honest about what it is -- an overlay, not a summed
+    national dose surface. The max-envelope CONUS grid is the next milestone.
+    """
+    tgts = targets_mod.load_targets()
+    results = []
+    for t in tgts:
+        req = PlumeRequest(
+            lat=t.lat, lon=t.lon, yield_mt=yield_mt, fission_fraction=fission_fraction
+        )
+        try:
+            wind = await _resolve_wind(req)
+            contours = _tier0_contours(req, wind)
+        except Exception as exc:
+            results.append({"target": t.name, "error": str(exc)})
+            continue
+        results.append(
+            {
+                "target": t.name,
+                "category": t.category,
+                "ground_zero": [t.lon, t.lat],
+                "wind": wind.model_dump(),
+                "contours": contours,
+            }
+        )
+    return {"disclaimer": DISCLAIMER, "yield_mt": yield_mt, "targets": results}
