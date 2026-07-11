@@ -265,25 +265,33 @@ Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
    should resemble Tier-0's order of magnitude and reach (sanity, not identity).
 7. **Footprint validation.** Compare one case against a published DELFIC or HYSPLIT
    footprint for shape/scale before trusting Tier-1 shapes in the UI.
-   **Status: scaffolding only, not done.** `falloutcast/validation/
-   reference_cases.py` documents two research passes that assembled a
-   candidate case (Small Boy, 1962-07-14 NTS, Area 5) but hit three blockers
-   before it could become a real assertion: (1) burst height is now
-   precisely sourced -- a ~3 m tower/stand, confirmed via a well-sourced
-   shot table -- but that's a confirmed mismatch with this project's
-   surface-burst-only (HOB=0) model, not a match, and none of the other
-   historical shots with published DELFIC/HYSPLIT comparisons are surface
-   bursts either (mostly 300-700 ft tower shots); (2) no machine-usable
-   target footprint number (only qualitative accuracy scores/figures in the
-   one DELFIC/HYSPLIT study located, and one adjacent-but-different real
-   number for Small Boy itself -- a measured I-131 release, not a dose-rate
-   contour); (3) no automated historical-wind source (Open-Meteo's ERA5
-   archive covers 1962 but doesn't expose pressure-level wind fields).
-   `scripts/validate_footprint.py` runs the harness against a placeholder
-   wind for a structural smoke check; `tests/test_footprint_validation_harness.py`
-   tests the harness code only, not the physics. See that module's
-   docstring for exactly what a future contributor needs to source to close
-   this out.
+   **Status: scaffolding only, not a validation.** `falloutcast/validation/
+   reference_cases.py` documents three research passes assembling a
+   candidate case (Small Boy, 1962-07-14, NTS Area 5). Progress:
+   - **Wind: CLOSED.** `small_boy_wind_h5min()` digitizes a real balloon/
+     tower sounding straight from the primary source (DNA 1251-1-EX Vol. I,
+     Table 109) -- not a placeholder.
+   - **Burst height: precisely sourced, still a mismatch.** Confirmed (both
+     the primary source's "Tower, over Nevada soil" and an independent
+     secondary shot table agree) as a ~3 m tower/stand, not this project's
+     assumed HOB=0. None of the other historical shots with published
+     DELFIC/HYSPLIT comparisons are true surface bursts either (mostly
+     300-700 ft tower shots).
+   - **Target footprint: still no digitized contour**, but no longer
+     nothing -- the primary source's own prose gives a real order-of-
+     magnitude/bearing check (fallout reached 250-400 mi downwind by late
+     D+1, peaking D+2, tracked to western Nebraska). `scripts/
+     validate_footprint.py` runs Tier-1 against the real wind and prints
+     this alongside the model's own bearing/reach for a human to eyeball --
+     bearing came out close (67 deg modeled vs. 58 deg to western Nebraska);
+     reach undershot (129 mi vs. reported 250-400 mi by D+1). The actual
+     contour plates (DNA 1251-1-EX Figures 329-332) are scanned images, not
+     OCR-legible as geometry -- digitizing those from the scan would close
+     this gap for real.
+
+   `tests/test_footprint_validation_harness.py` tests the harness code
+   (including the real wind digitization) but still asserts no physics
+   claim -- see the module docstring for exactly what's left.
 
 ## 10. Open decisions (your call)
 

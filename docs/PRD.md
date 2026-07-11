@@ -123,10 +123,15 @@ behind the same API rather than blocking launch.
   so fractionated output is directionally validated (structural tests) but
   not quantitatively calibrated. **Remaining gap 1:** source that
   coefficient. **Remaining gap 2:** footprint validation against a published
-  DELFIC/HYSPLIT case is scaffolding-only (`falloutcast/validation/`) — no
-  confirmed surface-burst historical case, machine-usable target footprint,
-  or historical wind fetch was found; see TIER1_SPEC.md §9.7 for exactly
-  what's missing.
+  DELFIC/HYSPLIT case is scaffolding-only (`falloutcast/validation/`).
+  A real historical wind (DNA 1251-1-EX Table 109, digitized from the
+  primary source) replaced the earlier placeholder, and the candidate case's
+  yield/location/burst-type are now well-sourced — but the burst height (a
+  confirmed ~3 m tower shot) is a confirmed mismatch with this project's
+  surface-burst-only model, and there is still no digitized target contour
+  to assert against (the primary source's contour figures are scanned
+  plates, not machine-readable geometry). See TIER1_SPEC.md §9.7 for
+  exactly what's missing.
 - **M2:** Exchange national max-envelope dose surface (shared CONUS grid,
   precompute-per-target-then-composite, aggressive per-met-run caching).
 - **M3:** Optional HYSPLIT Tier-2 backend behind the same `/plume` contract.
