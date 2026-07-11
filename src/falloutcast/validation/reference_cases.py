@@ -8,25 +8,28 @@ of why it isn't a passing/failing test yet -- per this project's rule against
 claiming validation that didn't happen, nothing here is wired into a
 numeric assertion.
 
-What blocked a full case (as of this research pass, 2026-07):
+What blocked a full case (as of this research pass, 2026-07, updated after a
+second pass that pinned down SMALL_BOY_1962's numbers more precisely):
 
-1. NO CONFIRMED SURFACE BURST. FalloutCast models surface bursts only. The
-   one detailed published DELFIC/HYSPLIT accuracy study located (Miller,
-   "A Comparison in the Accuracy of Mapping Nuclear Fallout Patterns using
-   HPAC, HYSPLIT, DELFIC FPT and an AFIT FORTRAN95 Fallout Deposition Code",
-   AFIT thesis, 2011, DTIC ADA538272) validates DELFIC FPT against 6 real
-   NTS shots (George, Ess, Zucchini, Priscilla, Smoky, Johnie Boy) -- but
-   none is a true surface burst (mostly 300-700 ft tower shots; Ess and
-   Johnie Boy are shallow-subsurface cratering shots). Comparing our
-   surface-burst-only model against a tower shot's footprint would be a
-   physical mismatch, not a real test.
+1. NO CONFIRMED SURFACE BURST -- now precisely quantified, still unresolved.
+   FalloutCast models surface bursts only. The one detailed published
+   DELFIC/HYSPLIT accuracy study located (Miller, "A Comparison in the
+   Accuracy of Mapping Nuclear Fallout Patterns using HPAC, HYSPLIT, DELFIC
+   FPT and an AFIT FORTRAN95 Fallout Deposition Code", AFIT thesis, 2011,
+   DTIC ADA538272) validates DELFIC FPT against 6 real NTS shots (George,
+   Ess, Zucchini, Priscilla, Smoky, Johnie Boy) -- but none is a true
+   surface burst (mostly 300-700 ft tower shots; Ess and Johnie Boy are
+   shallow-subsurface cratering shots). Comparing our surface-burst-only
+   model against a tower shot's footprint would be a physical mismatch, not
+   a real test.
 
-   SMALL_BOY_1962 below is the one NTS shot commonly described as a true
-   surface detonation, but even its height-of-burst classification is not
-   independently confirmed here (see field notes) -- secondary sources
-   variously describe it as "surface" and "surface (tower)". The primary
-   source (DOE/NV-209, "United States Nuclear Tests") would resolve this;
-   its PDF blocked automated fetching in this pass.
+   SMALL_BOY_1962 below was the one NTS shot this project hoped might be a
+   true (HOB=0) surface detonation. A second research pass found a
+   well-sourced shot table (see `citation`) that RESOLVES the ambiguity, but
+   not in our favor: Small Boy was a ~3 m tower/stand shot, not a literal
+   ground-level burst. It's confirmed close to the ground for a 1.7 kt
+   device, but it is a confirmed, quantified mismatch with HOB=0, not a
+   match -- see `height_of_burst_m` and `burst_type_note`.
 
 2. NO MACHINE-USABLE TARGET FOOTPRINT. The AFIT thesis reports DELFIC FPT's
    accuracy as a Normalized Absolute Difference (NAD ~0.12-0.28) against the
@@ -77,6 +80,7 @@ class ReferenceCase:
     lon: float
     yield_kt: float
     yield_source: str
+    height_of_burst_m: float      # confirmed tower/stand height above grade
     burst_type_note: str          # what's known/unresolved about HOB
     fission_fraction_note: str    # DOE/NV-209 does not publish this; unknown
     footprint_target_note: str    # what (if anything) exists to compare against
@@ -86,24 +90,40 @@ class ReferenceCase:
 SMALL_BOY_1962 = ReferenceCase(
     name="Small Boy",
     date="1962-07-14",
-    lat=37.0396,       # NTS Area 5, approximate -- not independently verified
-    lon=-116.0790,
-    yield_kt=1.7,      # commonly cited secondary-source figure; NOT verified
-                       # against the primary DOE/NV-209 table in this pass
+    # NTS Area 5, 36.798N 115.932W -- per the sourced table below (not the
+    # earlier approximate guess this field held before that table was found).
+    lat=36.798,
+    lon=-115.932,
+    yield_kt=1.7,
     yield_source=(
-        "Secondary sources (news/archive summaries citing DOE/NV-209 "
-        "'United States Nuclear Tests, July 1945 through September 1992') "
-        "give ~1.7 kt. The primary DOE/NV-209 PDF (nnss.gov) returned a "
-        "download block during automated fetch and was not independently "
-        "checked -- treat this yield as UNVERIFIED pending that check."
+        "CONFIRMED 1.7 kt via Wikipedia's 'Operation Sunbeam' shot table "
+        "(https://en.wikipedia.org/wiki/Operation_Sunbeam, retrieved "
+        "2026-07-10), which cites DOE/NV-209 Rev 15 ('United States Nuclear "
+        "Tests, July 1945 through September 1992'), Norris & Cochran, "
+        "'United States nuclear tests, July 1945 to 31 December 1992' (NWD "
+        "94-1, NRDC Nuclear Weapons Databook, 1994), and Hansen, 'The Swords "
+        "of Armageddon', Vol. 8 (1995) in agreement. The primary DOE/NV-209 "
+        "PDF (nnss.gov) itself still blocks automated fetch (WAF challenge), "
+        "so this is a secondary-source confirmation, not a primary-document "
+        "read -- but three independent secondary compilations agreeing is "
+        "materially stronger than the single unverified figure this field "
+        "held before."
     ),
+    height_of_burst_m=3.0,
     burst_type_note=(
-        "Described inconsistently across sources as 'surface' and 'surface "
-        "(tower)'. Part of Operation Sunbeam/Dominic II, whose stated intent "
-        "was a true surface (or near-surface) shot to study fallout -- but "
-        "that intent is not the same as a confirmed height-of-burst=0 in the "
-        "primary record. UNCONFIRMED; needs DOE/NV-209 or DNA 6027F "
-        "(Operation Dominic II shot report) to resolve."
+        "RESOLVED (was previously ambiguous): the same sourced table lists "
+        "delivery as 'tower, weapon effect' at 'elevation 940 m (3,080 ft) + "
+        "height 3 m (9.8 ft)' -- i.e. a ~3 m tower/stand, NOT a literal "
+        "height-of-burst=0 surface burst. This project's model assumes "
+        "surface burst (HOB=0); a 3 m stand for a 1.7 kt device is close to "
+        "the ground (fireball radius for a burst this size is order-10s-of-"
+        "meters per Glasstone & Dolan HOB-scaling curves) but is still a "
+        "confirmed, quantified MISMATCH with the model's assumption, not an "
+        "exact match. Also correcting an earlier draft of this note, which "
+        "speculatively described Small Boy's purpose as fallout-pattern "
+        "study: the sourced table instead gives the purpose as 'missile "
+        "silo hardening principles, specifically EMP' -- that speculation "
+        "was this project's own unsourced inference and has been removed."
     ),
     fission_fraction_note=(
         "Not publicly published for any specific device. Low-yield, "
@@ -112,16 +132,31 @@ SMALL_BOY_1962 = ReferenceCase(
         "and drives the total activity linearly. PLACEHOLDER until sourced."
     ),
     footprint_target_note=(
-        "No downwind-distance, contour-area, or crosswind-width number "
-        "located for this shot specifically. DNA 1251-1-EX (Compilation of "
-        "Local Fallout Data from Test Detonations 1945-1962) is the primary "
-        "source that would have it; not accessed in this pass."
+        "Still NO downwind-distance, contour-area, or crosswind-width number "
+        "-- the actual gap this field exists to flag. One adjacent real "
+        "number was found, though: the sourced table reports 'I-131 venting "
+        "detected, 270 kCi (10,000 TBq)' released off-site. That's a "
+        "genuine measured quantity from the event, not a guess -- but it's "
+        "total iodine-131 activity release, a different physical quantity "
+        "from an H+1 gamma dose-rate contour (this model's output), and "
+        "converting one to the other would need fractionation/timing "
+        "assumptions this project isn't prepared to invent (see "
+        "sizedist.F_VOLATILE_PLACEHOLDER for the same category of gap). "
+        "Left here as a lead, not used as a target. DNA 1251-1-EX "
+        "(Compilation of Local Fallout Data from Test Detonations "
+        "1945-1962) remains the primary source most likely to have an "
+        "actual contour; not accessed in this pass."
     ),
     citation=(
-        "DNA 6027F, Operation Dominic II, Shots Little Feller II, Johnie "
-        "Boy, Small Boy (DTIC ADA128367) -- rate-limited during automated "
-        "fetch, not independently read in this pass. DOE/NV-209 (nnss.gov) "
-        "is the authoritative yield/HOB source."
+        "Wikipedia, 'Operation Sunbeam' (retrieved 2026-07-10), shot table "
+        "citing DOE/NV-209 Rev 15; Norris & Cochran, NWD 94-1 (NRDC, 1994); "
+        "Hansen, 'The Swords of Armageddon' Vol. 8 (1995); Sublette, "
+        "Nuclear Weapons Archive. DNA 6027F, Operation Dominic II, Shots "
+        "Little Feller II, Johnie Boy, Small Boy (DTIC ADA128367) was "
+        "identified as the primary shot report but rate-limited during "
+        "automated fetch in both research passes -- still not "
+        "independently read. DOE/NV-209 itself (nnss.gov) still blocks "
+        "automated fetch (WAF challenge)."
     ),
 )
 
