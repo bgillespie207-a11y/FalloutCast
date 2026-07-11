@@ -1,16 +1,17 @@
 """Structural test of the footprint-validation harness plumbing.
 
 This does NOT validate Tier-1's physics against a real footprint -- there is
-no sourced target to check against yet (see
-`falloutcast.validation.reference_cases` module docstring for the three
-specific gaps: no confirmed surface-burst case, no machine-usable target
-footprint, no historical wind fetch). This test only confirms the harness
-code itself runs end-to-end and returns sane, finite, structurally-bounded
-output, using a synthetic wind profile (explicitly not a claim about any
-real historical wind).
+still no sourced target contour to check against (see
+`falloutcast.validation.reference_cases` module docstring: burst-height
+mismatch and no digitized target footprint are still open; the historical
+wind gap IS closed, real data digitized from the primary source). Most tests
+here use a synthetic wind profile (explicitly not a claim about any real
+historical wind) to test the harness code path in isolation; one test below
+exercises the real digitized Small Boy sounding specifically.
 """
 
 import numpy as np
+import pytest
 
 from falloutcast.physics import tier1
 from falloutcast.validation import reference_cases as ref
@@ -63,3 +64,32 @@ def test_reference_case_fields_document_their_own_uncertainty():
                        "footprint_target_note"):
         text = getattr(case, field_name)
         assert len(text) > 20, f"{field_name} looks unpopulated"
+
+
+def test_small_boy_wind_h5min_shape_and_units():
+    """Digitized DNA 1251-1-EX Table 109 sounding: same length across all
+    three returned arrays, heights strictly increasing (source table is
+    altitude-ordered), and the fastest tabulated leg (20,000 ft, 280 deg,
+    28.8 mph) converts to the expected ~12.9 m/s -- catches a unit-conversion
+    regression (mph/ft mixed up with m/s/m) without re-asserting the whole
+    table."""
+    heights_m, u, v = ref.small_boy_wind_h5min()
+    assert len(heights_m) == len(u) == len(v) == len(ref.SMALL_BOY_WIND_H5MIN_FT_MSL)
+    assert np.all(np.diff(heights_m) > 0)
+    top_speed_ms = np.hypot(u[-1], v[-1])
+    assert top_speed_ms == pytest.approx(28.8 * 0.44704, rel=1e-3)
+
+
+def test_run_case_with_real_small_boy_wind_is_finite_and_bounded():
+    """End-to-end integration of the real digitized sounding through
+    run_case -- not a physics validation (see module docstring: still no
+    target contour), just confirms the real-data path produces sane,
+    finite, non-crashing output the way the synthetic-wind tests above do."""
+    heights_m, u, v = ref.small_boy_wind_h5min()
+    result = ref.run_case(
+        ref.SMALL_BOY_1962, heights_m=heights_m, wind_u_ms=u, wind_v_ms=v,
+        fission_fraction=1.0, t_max_s=48 * 3600.0,
+    )
+    assert np.isfinite(result.downwind_reach_miles)
+    assert result.downwind_reach_miles > 0
+    assert 0.0 <= result.fraction_aloft <= 1.0

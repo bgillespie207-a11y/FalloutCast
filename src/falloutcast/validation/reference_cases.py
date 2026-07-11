@@ -31,30 +31,39 @@ second pass that pinned down SMALL_BOY_1962's numbers more precisely):
    device, but it is a confirmed, quantified mismatch with HOB=0, not a
    match -- see `height_of_burst_m` and `burst_type_note`.
 
-2. NO MACHINE-USABLE TARGET FOOTPRINT. The AFIT thesis reports DELFIC FPT's
-   accuracy as a Normalized Absolute Difference (NAD ~0.12-0.28) against the
-   real DNA 1251-1-EX contours, and shows comparison figures -- but neither
-   is a number I could assert as "the Tier-1 footprint's reach should be
-   X miles". Turning this into a real test needs either the raw DNA
-   1251-1-EX contour digitization, or hand-extracted coordinates from the
-   thesis's figures (28-32).
+2. NO MACHINE-USABLE TARGET FOOTPRINT -- partially narrowed, still open. A
+   third research pass located and read the actual DNA 1251-1-EX Vol. I
+   entry for Small Boy (DTIC ADA079309, via archive.org's OCR text -- the
+   PDF itself still 403s to automated fetch, but the plaintext transcription
+   was readable directly). It describes real contour FIGURES (329-332: H+1
+   hour gamma dose-rate contours from close-in out to 300 miles downwind)
+   and gives one genuine quantitative structural fact in prose: fallout
+   "started arriving at 250 to 400 miles downwind... late... D+1 day
+   reaching a peak at D+2 days," tracked by ground monitors "as far as
+   western Nebraska." That's real and usable for an order-of-magnitude
+   reach/timing sanity check (see `run_case` / `scripts/validate_footprint.py`)
+   -- but the figures themselves are scanned plates, not OCR'd as geometry,
+   so there is still no digitized contour polygon or R/hr-vs-distance curve
+   to assert against. Digitizing Figures 329-332 from the actual scanned
+   page images (not just the OCR text) would close this gap; not done here.
 
-3. NO HISTORICAL WIND PROFILE. Tier-1 needs a full vertical wind profile.
-   Open-Meteo's historical ERA5 archive (`archive-api.open-meteo.com`)
-   covers 1962, confirmed live -- but does NOT expose the pressure-level
-   wind fields (`windspeed_XXXhPa` etc.) that `weather/openmeteo.py` uses;
-   they return null with no error. So there is currently no automated way
-   to fetch the actual wind ground zero saw on the test date. A wind
-   profile must be supplied by hand (see `run_case`) from some other
-   source (e.g. digitized radiosonde data from the test report) to run a
-   case at all.
+3. NO HISTORICAL WIND PROFILE -- CLOSED. The same DNA 1251-1-EX entry
+   includes Table 109, "NEVADA WIND DATA FOR OPERATION SUNBEAM - SMALL BOY":
+   a real balloon/tower sounding at Frenchman's Flat, NTS, at H+5 min,
+   H+15 min, and H+70 min post-burst, altitude 3,078-20,000 ft MSL. This is
+   digitized below as `SMALL_BOY_WIND_H5MIN_*` / `small_boy_wind_h5min()`.
+   Open-Meteo's own historical ERA5 archive was a dead end for this (covers
+   1962 but doesn't expose pressure-level wind fields, confirmed live) --
+   this real sounding came from the primary test report instead.
 
-Given all three gaps, `run_case` below is a tool for a future contributor who
-tracks down the missing pieces -- not something wired into pytest's assert-
-based tests. See `tests/test_footprint_validation_harness.py` for the one
-thing that IS tested here: that the harness plumbing itself runs and returns
-sane, finite, structurally-bounded output (a code-correctness check, not a
-physics validation).
+Given gaps 1 and 2 remain, `run_case` is still a tool for manual/structural
+comparison, not something wired into pytest's assert-based tests -- there is
+still no sourced numeric contour to assert equality/tolerance against, and
+the burst-height mismatch (gap 1) means even a perfect wind and a digitized
+target contour wouldn't make this an apples-to-apples validation. See
+`tests/test_footprint_validation_harness.py` for what IS tested: the harness
+plumbing runs and returns sane, finite, structurally-bounded output (a
+code-correctness check, not a physics validation).
 """
 
 from __future__ import annotations
@@ -64,6 +73,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..physics import tier1
+
+_MPH_TO_MS = 0.44704
+_FT_TO_M = 0.3048
 
 
 @dataclass(frozen=True)
@@ -132,33 +144,83 @@ SMALL_BOY_1962 = ReferenceCase(
         "and drives the total activity linearly. PLACEHOLDER until sourced."
     ),
     footprint_target_note=(
-        "Still NO downwind-distance, contour-area, or crosswind-width number "
-        "-- the actual gap this field exists to flag. One adjacent real "
-        "number was found, though: the sourced table reports 'I-131 venting "
-        "detected, 270 kCi (10,000 TBq)' released off-site. That's a "
-        "genuine measured quantity from the event, not a guess -- but it's "
-        "total iodine-131 activity release, a different physical quantity "
-        "from an H+1 gamma dose-rate contour (this model's output), and "
-        "converting one to the other would need fractionation/timing "
-        "assumptions this project isn't prepared to invent (see "
-        "sizedist.F_VOLATILE_PLACEHOLDER for the same category of gap). "
-        "Left here as a lead, not used as a target. DNA 1251-1-EX "
-        "(Compilation of Local Fallout Data from Test Detonations "
-        "1945-1962) remains the primary source most likely to have an "
-        "actual contour; not accessed in this pass."
+        "Read DNA 1251-1-EX Vol. I directly (DTIC ADA079309, via archive.org "
+        "OCR text; the entry starts under 'OPERATION SUNBEAM - Small Boy', "
+        "p.~569 of the scanned volume). Still NO digitized R/hr-vs-distance "
+        "contour or contour-area number -- the actual figures (329: close-in "
+        "GZ contours; 330: H+1 hour contours to 50,000 ft downwind; 331: "
+        "off-site pattern to 29 mi; 332: off-site pattern to 300 mi; 333: "
+        "cloud path to western Nebraska) are scanned plates, not OCR-legible "
+        "as geometry. What IS usable as a rough structural/order-of-magnitude "
+        "check: the report states fallout 'started arriving at 250 to 400 "
+        "miles downwind... late... D+1 day reaching a peak at D+2 days,' "
+        "tracked by ground monitors 'as far as western Nebraska' (NNE-ish of "
+        "NTS). Two other real sourced numbers, neither a footprint target "
+        "but worth keeping: observed CLOUD TOP HEIGHT 19,000 ft MSL (a "
+        "sanity check for this project's own wseg10.cloud_center_height_kft, "
+        "which is a different quantity -- center vs top -- so not a direct "
+        "equality check), and I-131 venting release of 270 kCi (10,000 TBq) "
+        "off-site (a different physical quantity than a gamma dose-rate "
+        "contour; would need fractionation/timing assumptions this project "
+        "won't invent -- see sizedist.F_VOLATILE_PLACEHOLDER for the same "
+        "category of gap)."
     ),
     citation=(
-        "Wikipedia, 'Operation Sunbeam' (retrieved 2026-07-10), shot table "
-        "citing DOE/NV-209 Rev 15; Norris & Cochran, NWD 94-1 (NRDC, 1994); "
-        "Hansen, 'The Swords of Armageddon' Vol. 8 (1995); Sublette, "
-        "Nuclear Weapons Archive. DNA 6027F, Operation Dominic II, Shots "
-        "Little Feller II, Johnie Boy, Small Boy (DTIC ADA128367) was "
-        "identified as the primary shot report but rate-limited during "
-        "automated fetch in both research passes -- still not "
-        "independently read. DOE/NV-209 itself (nnss.gov) still blocks "
-        "automated fetch (WAF challenge)."
+        "PRIMARY SOURCE READ DIRECTLY: DNA 1251-1-EX, 'Compilation of Local "
+        "Fallout Data from Test Detonations 1945-1962 Extracted from DASA "
+        "1251,' Vol. I -- Continental U.S. Tests (DTIC ADA079309), 'OPERATION "
+        "SUNBEAM - Small Boy' entry, via archive.org OCR transcription "
+        "(https://archive.org/details/DTIC_ADA079309, retrieved 2026-07-10). "
+        "The PDF itself (apps.dtic.mil, dtra.mil) still blocks automated "
+        "fetch, but archive.org's plaintext OCR of the same scanned document "
+        "was directly readable, including Table 109's numeric wind sounding. "
+        "Cross-checked against secondary compilation: Wikipedia, 'Operation "
+        "Sunbeam,' shot table citing DOE/NV-209 Rev 15, Norris & Cochran (NWD "
+        "94-1, 1994), Hansen ('Swords of Armageddon' Vol. 8, 1995), and "
+        "Sublette's Nuclear Weapons Archive -- coordinates and site elevation "
+        "agree closely (3,078 ft MSL here vs. 940 m there = 3,084 ft)."
     ),
 )
+
+
+# Real historical wind sounding for Small Boy, H+5 minutes post-burst,
+# observed at Frenchman's Flat, NTS -- digitized from DNA 1251-1-EX Vol. I,
+# Table 109, "NEVADA WIND DATA FOR OPERATION SUNBEAM - SMALL BOY" (see
+# SMALL_BOY_1962.citation). The table also gives H+15min and H+70min
+# columns; H+5min is used here as the most altitude-complete of the three
+# and closest to burst-time conditions. The original table has no reading
+# at 15,000 ft for this column -- that altitude is skipped rather than
+# interpolated or invented; tier1.simulate's np.interp handles the sparser
+# altitude spacing fine. Direction is meteorological "from" degrees, speed
+# in mph, exactly as tabulated in the source (both units given explicitly
+# in the table header).
+SMALL_BOY_WIND_H5MIN_FT_MSL = np.array(
+    [3078, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 12000, 14000, 16000, 18000, 20000],
+    dtype=float,
+)
+SMALL_BOY_WIND_H5MIN_DIR_FROM_DEG = np.array(
+    [135, 300, 310, 330, 280, 250, 240, 240, 240, 240, 240, 280, 280], dtype=float
+)
+SMALL_BOY_WIND_H5MIN_SPEED_MPH = np.array(
+    [2.3, 1.2, 1.2, 2.3, 2.3, 6.9, 13.8, 18.4, 9.2, 9.2, 9.2, 16.1, 28.8], dtype=float
+)
+
+
+def small_boy_wind_h5min() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Small Boy's real H+5min wind sounding as (heights_m, wind_u_ms, wind_v_ms)
+    -- the form `run_case`/`tier1.simulate` expect. See the module-level
+    `SMALL_BOY_WIND_H5MIN_*` arrays for the citation and caveats.
+
+    u/v convention matches `weather.openmeteo._dir_to_uv`: meteorological
+    "from" direction converted to the (east, north) vector the wind blows
+    TOWARD.
+    """
+    heights_m = SMALL_BOY_WIND_H5MIN_FT_MSL * _FT_TO_M
+    speed_ms = SMALL_BOY_WIND_H5MIN_SPEED_MPH * _MPH_TO_MS
+    rad = np.deg2rad(SMALL_BOY_WIND_H5MIN_DIR_FROM_DEG)
+    u = -speed_ms * np.sin(rad)
+    v = -speed_ms * np.cos(rad)
+    return heights_m, u, v
 
 
 @dataclass
