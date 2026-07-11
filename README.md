@@ -29,7 +29,9 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
 - [x] 57-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
 - [x] DELFIC-style fractionation rule for activity-vs-size (refractory/volume
       vs volatile/surface split, opt-in); partition fraction still a flagged
-      PLACEHOLDER pending a sourced DELFIC/Freiling value
+      PLACEHOLDER — a research pass confirmed no single bulk constant exists
+      to source (DELFIC/Miller/Freiling all resolve this per-nuclide), so
+      closing this needs a richer model, not a citation, see `sizedist.py`
 - [x] `/ensemble` runs real Open-Meteo GFS-ensemble wind members (31: control +
       30 perturbed), falling back to synthetic perturbation only if the
       ensemble fetch fails

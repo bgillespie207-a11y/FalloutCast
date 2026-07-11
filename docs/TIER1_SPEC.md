@@ -223,9 +223,13 @@ array ops. Scale: `N_d·N_z ≈ 150` puffs, `dt` 1–5 min, `t_max` ~24–48 h �
    now models the refractory (volume ∝ d³) / volatile (surface ∝ d²) split
    structurally (see its module docstring for the derivation), opt-in via
    `lognormal_bins(fractionation=...)`. The bulk refractory/volatile activity
-   partition fraction (`F_VOLATILE_PLACEHOLDER`) is still unsourced — flagged
-   in code, needs a DELFIC/Freiling value before this is more than
-   directionally correct.
+   partition fraction (`F_VOLATILE_PLACEHOLDER`) is still unsourced — a
+   research pass confirmed there isn't a single bulk constant to find:
+   DELFIC's own model (Tompkins 1968, DASA-1800-5) and Miller's 1400°C
+   threshold both resolve this per-nuclide, and Freiling's fractionation
+   formalism is a mass-89/mass-95 ratio correlation, not a lumped fraction.
+   Replacing this placeholder needs the richer per-nuclide model, not a
+   citation — see the code comment for the full trail.
 
 High-confidence, no sourcing needed: US Standard Atmosphere 1976, Sutherland's law,
 Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
