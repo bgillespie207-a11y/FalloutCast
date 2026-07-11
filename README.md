@@ -50,7 +50,10 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
 - [x] Exchange mode: true national max-envelope dose surface
       (`POST /exchange/envelope`) — one composite CONUS grid, cell-wise max
       across all targets; no result caching yet (recomputes live every call)
-- [ ] Web map frontend (MapLibre + deck.gl)
+- [x] Web map frontend (`web/`, MapLibre + deck.gl) — single-plume view only
+      (Tier 0/1 toggle, click-to-set-GZ, decay time slider computed
+      client-side with zero extra API calls, GeoJSON export). Exchange
+      overlay/envelope and ensemble bands have no frontend yet.
 
 ## Quickstart
 
@@ -92,6 +95,27 @@ instead):
 ```bash
 curl -s -X POST 'localhost:8000/exchange/envelope?yield_mt=0.3&fission_fraction=0.5'
 ```
+
+## Web frontend
+
+```bash
+cd web
+npm install
+npm run dev          # http://localhost:5173, expects the API on :8000
+```
+
+Single-plume view: click the map (or type coordinates) to set ground zero,
+pick yield/fission-fraction/tier, hit Compute. The decay-time slider doesn't
+re-hit the API as you drag it — Way-Wigner decay (dose rate ∝ t^-1.2) is
+separable, so the contour for level *L* at time *t* is exactly the H+1
+contour for level *L·t^1.2*; the app fetches one dense set of H+1 levels
+once and relabels/reselects client-side (`web/src/decay.ts`). No exchange
+overlay/envelope or ensemble-band view yet — single detonations only.
+
+Basemap is [OpenFreeMap](https://openfreemap.org) (free, keyless, no signup
+needed). CORS is wide open on the API (`allow_origins=["*"]`) since every
+endpoint is read-only/side-effect-free — there's no credentialed state a
+cross-origin request could touch.
 
 ## Architecture
 

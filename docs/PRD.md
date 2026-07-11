@@ -173,7 +173,14 @@ behind the same API rather than blocking launch.
   current 10-target scale (~6s end to end) but would need real caching to
   scale further or serve concurrent users cheaply.
 - **M3:** Optional HYSPLIT Tier-2 backend behind the same `/plume` contract.
-- **M4:** MapLibre + deck.gl frontend; decay time slider; GeoJSON/export.
+- **M4 (done, single-plume only):** MapLibre + deck.gl frontend (`web/`) —
+  click-to-set-GZ, Tier 0/1 toggle, decay time slider (client-side only, see
+  `web/src/decay.ts`: Way-Wigner decay is separable in time so the slider
+  relabels one dense pre-fetched level set instead of re-hitting the API),
+  GeoJSON export. **Not done:** no frontend for `/exchange`,
+  `/exchange/envelope`, or `/ensemble` — those remain API-only. CORS opened
+  on the API (wide open; every endpoint is read-only, nothing credentialed
+  to protect) so the separately-served frontend can call it.
 
 ### Decisions resolved (were §10 open questions)
 
