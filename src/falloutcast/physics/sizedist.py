@@ -21,8 +21,10 @@ particle surfaces after the refractory core has solidified, so their activity
 is proportional to particle SURFACE AREA (~ d^2). Net effect: small particles
 carry disproportionate volatile activity, lengthening the far-downwind tail
 and increasing the fraction that stays aloft. See Freiling (1961), Miller
-(1960), and the DELFIC fractionation submodel (Norment, DNA-5159F) for the
-physical basis.
+(1960), and DELFIC's particle activity module (Tompkins, DASA-1800-5, 1968;
+per Hooper & Jodoin, ORNL/TM-2010/220, 2010) for the physical basis -- and
+`F_VOLATILE_PLACEHOLDER` below for why none of those give a single bulk
+constant this simplified model could just cite.
 
 Derivation used here: for X ~ LogNormal(mu, sigma^2), d^k * pdf(d) is itself
 proportional to a LogNormal(mu + k*sigma^2, sigma^2) density (a standard
@@ -71,26 +73,55 @@ SIGMA_LN_DEFAULT = 0.7           # ~ ln 2, DELFIC/Nathans log-slope
 # PLACEHOLDER: bulk fraction of TOTAL H+1 fission-product activity carried by
 # volatile (surface-condensing) nuclides, as opposed to refractory
 # (volume-condensing) nuclides -- see the module docstring for the physical
-# picture. This is genuinely time- and fissile-material-dependent (U-235 vs
-# Pu-239 fission-product yields differ, and the volatile/refractory MIX
-# itself shifts as different half-life chains decay), which is exactly why
-# DELFIC's own fractionation submodel tracks nuclides individually rather
-# than using one lumped constant. No sourced bulk number was located for this
-# pass. To replace this placeholder, need one of:
-#   - Freiling, E.C., "Radionuclide Fractionation in Bomb Debris," Science
-#     133:1991-1998 (1961) -- refractory/volatile element classification and
-#     empirical per-element fractionation ratios (R_i).
-#   - Norment, H.G., DELFIC: Dep. of Fallout in Land or Coastal Interactive
-#     Compute Model, DNA-5159F -- the DELFIC fractionation submodel this file
-#     approximates.
+# picture.
+#
+# A research pass (2026-07) read four primary/near-primary sources trying to
+# source this number and instead found strong, convergent evidence that NO
+# such single bulk constant exists in the authoritative literature -- the
+# real models all resolve fractionation per-NUCLIDE, not as one lumped
+# scalar, which is a structurally different (and structurally richer) thing
+# than what this file's simplified two-branch (d^2/d^3) model needs:
+#   - Hooper, D.A. & Jodoin, V.J., "Revision of the DELFIC Particle Activity
+#     Module," ORNL/TM-2010/220 (2010), Sec. 3.5 -- confirms DELFIC's actual
+#     fractionation subroutine (FRATIO) decides refractory-vs-volatile PER
+#     NUCLIDE by comparing that nuclide's own oxide boiling point against the
+#     soil solidification temperature/time -- not a fixed split. Cites
+#     Tompkins, R.C., "Department of Defense Land Fallout Prediction System,
+#     Volume V -- Particle Activity," DASA-1800-5, U.S. Army Nuclear Defense
+#     Laboratory (1968), as the primary source for DELFIC's actual particle
+#     activity model (supersedes this file's earlier, less precise citation
+#     of Norment's overall DELFIC Volume II user's manual).
 #   - Miller, C.F., "A Theory of Formation of Fallout from Land-Surface
-#     Nuclear Detonations," USNRDL-TR-425 (1960) -- the volume/surface
-#     partition theory this simplified two-branch model is based on.
-# Until sourced, 0.5 is an ILLUSTRATIVE default only (chosen for symmetry, not
-# evidence). Fractionated output is directionally correct (small particles
-# gain a disproportionate activity share, lengthening the downwind tail and
-# aloft fraction) but NOT quantitatively validated -- do not treat it as a
-# calibrated split.
+#     Nuclear Detonations," USNRDL-TR-425 (1960) -- the original refractory/
+#     volatile partition theory (per Martin, C.R., "Fallout Fractionation in
+#     Silicate Soils," AFIT/DS/PH/83-3 (1983), Ch. I, which reads and extends
+#     it): condensing nuclides are classified refractory (volume-distributed)
+#     or volatile (surface-distributed) by comparing each nuclide's own
+#     condensation temperature against a ~1400 deg C threshold -- again
+#     per-nuclide, not a bulk fraction.
+#   - Freiling, E.C., Kay, M.A., & Sanderson, J.V., "Illustrative Calculations
+#     of the Effect of Radionuclide Fractionation on Exposure-Dose Rate from
+#     Local Fallout," USNRDL-TR-715 (1964) -- Freiling's own fractionation
+#     formalism is a logarithmic correlation of fractionation RATIOS between
+#     specific mass-chain pairs (canonically mass-89, e.g. Sr-89, as the
+#     "fully volatile" reference and mass-95, e.g. Zr-95, as the "fully
+#     refractory" reference), not a single volatile-activity-fraction number.
+#   - Freiling, E.C., "Radionuclide Fractionation in Bomb Debris," Science
+#     133:1991-1998 (1961) -- the original empirical logarithmic-correlation
+#     result the above builds on; same mass-chain-pair structure, not a bulk
+#     split.
+# Replacing this placeholder with a properly sourced number would mean either
+# (a) implementing DELFIC's actual per-nuclide FRATIO logic (fission yields +
+# oxide boiling points vs. soil solidification temperature -- a materially
+# bigger model than this file's two-branch approximation), or (b) computing a
+# summary statistic from fission-yield tables ourselves for a stated
+# reference case -- which is original derivation, not citing an existing
+# constant, and this project's own rules treat that the same as inventing a
+# number. Until one of those is actually done, 0.5 remains an ILLUSTRATIVE
+# default only (chosen for symmetry, not evidence). Fractionated output is
+# directionally correct (small particles gain a disproportionate activity
+# share, lengthening the downwind tail and aloft fraction) but NOT
+# quantitatively validated -- do not treat it as a calibrated split.
 F_VOLATILE_PLACEHOLDER = 0.5
 
 
