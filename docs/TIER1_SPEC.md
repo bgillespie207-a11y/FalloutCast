@@ -219,7 +219,13 @@ array ops. Scale: `N_d·N_z ≈ 150` puffs, `dt` 1–5 min, `t_max` ~24–48 h �
 2. Particle density `ρ_p` — DELFIC.
 3. Activity-to-H+1-dose-rate conversion — Glasstone & Dolan, *Effects of Nuclear
    Weapons*.
-4. (M1.5) Fractionation activity-vs-size rule — DELFIC.
+4. (M1.5, implemented) Fractionation activity-vs-size rule — `sizedist.py`
+   now models the refractory (volume ∝ d³) / volatile (surface ∝ d²) split
+   structurally (see its module docstring for the derivation), opt-in via
+   `lognormal_bins(fractionation=...)`. The bulk refractory/volatile activity
+   partition fraction (`F_VOLATILE_PLACEHOLDER`) is still unsourced — flagged
+   in code, needs a DELFIC/Freiling value before this is more than
+   directionally correct.
 
 High-confidence, no sourcing needed: US Standard Atmosphere 1976, Sutherland's law,
 Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
