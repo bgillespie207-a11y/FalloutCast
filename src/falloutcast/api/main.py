@@ -142,18 +142,39 @@ def dose(req: DoseRequest) -> DoseResponse:
 async def ensemble_band(req: EnsembleRequest) -> EnsembleResponse:
     """Ensemble uncertainty band: probability that H+1 dose rate exceeds a level.
 
-    Runs Tier-1 across perturbed wind members and contours the exceedance
-    probability at 10/50/90%. The outer band is where fallout could reach; the
-    inner is where it very likely will. This is the antidote to a single crisp
-    (and false-confident) plume line.
-    """
-    try:
-        profile = await openmeteo.fetch_profile(req.lat, req.lon)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc}")
+    Runs Tier-1 across real Open-Meteo GFS-ensemble wind members (31 members:
+    1 control + 30 perturbed) and contours the exceedance probability at
+    10/50/90%. The outer band is where fallout could reach; the inner is where
+    it very likely will. This is the antidote to a single crisp (and
+    false-confident) plume line.
 
-    heights, u, v = openmeteo.profile_uv(profile)
-    members = ensemble.perturb_profile(u, v, n_members=req.n_members)
+    If the ensemble endpoint is unreachable, falls back to the deterministic
+    forecast's synthetic perturbation (`ensemble.perturb_profile`) rather than
+    failing outright -- the response says plainly which source was used.
+    """
+    notes: list[str] = []
+    try:
+        profiles = await openmeteo.fetch_ensemble_profiles(
+            req.lat, req.lon, n_members=req.n_members
+        )
+        heights, _, _ = openmeteo.profile_uv(profiles[0])
+        members = [openmeteo.profile_uv(p)[1:] for p in profiles]
+        notes.append(
+            f"Members are real Open-Meteo GFS-ensemble forecasts "
+            f"({openmeteo.ENSEMBLE_MODEL}), not synthetic perturbations."
+        )
+    except Exception as exc:
+        try:
+            profile = await openmeteo.fetch_profile(req.lat, req.lon)
+        except Exception as exc2:
+            raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc2}")
+        heights, u, v = openmeteo.profile_uv(profile)
+        members = ensemble.perturb_profile(u, v, n_members=req.n_members)
+        notes.append(
+            f"Ensemble wind fetch failed ({exc}); fell back to synthetic "
+            "perturbation of the deterministic forecast."
+        )
+
     res = ensemble.run_ensemble(
         yield_mt=req.yield_mt, fission_fraction=req.fission_fraction,
         heights_m=heights, members=members, levels_rhr=(req.level_rhr,),
@@ -170,12 +191,10 @@ async def ensemble_band(req: EnsembleRequest) -> EnsembleResponse:
     for f in gj["features"]:
         f["properties"] = {"exceedance_probability": f["properties"].pop("dose_rate_h1_rhr")}
 
-    notes = [
+    notes.append(
         f"Bands are P(H+1 dose rate >= {req.level_rhr:g} R/hr) at 10/50/90% across "
-        f"{res.n_members} wind members.",
-        "Members are perturbations of the deterministic forecast; swapping in "
-        "Open-Meteo ensemble members is a fetch-layer change.",
-    ]
+        f"{res.n_members} wind members."
+    )
     return EnsembleResponse(
         ground_zero=[req.lon, req.lat], level_rhr=req.level_rhr,
         n_members=res.n_members, mean_fraction_aloft=res.mean_fraction_aloft,

@@ -23,12 +23,25 @@ import numpy as np
 from ..physics import units
 
 GFS_ENDPOINT = "https://api.open-meteo.com/v1/gfs"
+ENSEMBLE_ENDPOINT = "https://ensemble-api.open-meteo.com/v1/ensemble"
+# NOTE: the resolution-suffixed id from the docs prose ("gfs025") silently
+# returns all-null data with a 200 status -- no error, just empty arrays.
+# Verified live 2026-07-10 that "gfs_seamless" is the working identifier for
+# the GFS ensemble (31 members: control + 30 perturbed) on this endpoint.
+ENSEMBLE_MODEL = "gfs_seamless"
 
 # Pressure levels to sample (hPa) and their approx geopotential heights (m)
 # under a standard atmosphere -- used only as a fallback if the API's own
 # geopotential_height fields are unavailable.
 _STD_LEVELS_HPA = (1000, 925, 850, 700, 500, 300, 250)
 _STD_HEIGHTS_M = (110, 760, 1460, 3010, 5570, 9160, 10360)
+
+# Open-Meteo's GFS Ensemble (gfs025 / gfs05) both ship 31 members total: an
+# unsuffixed control member plus 30 perturbed members ("_member01".."_member30"
+# in the hourly response keys). Confirmed against the live endpoint 2026-07-10
+# (https://open-meteo.com/en/docs/ensemble-api) -- not a documented constant,
+# so re-check if Open-Meteo changes their ensemble configuration.
+ENSEMBLE_MEMBERS_AVAILABLE = 31
 
 
 @dataclass
@@ -157,3 +170,95 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
         speed_ms=np.asarray(speeds)[order],
         direction_deg=np.asarray(dirs)[order],
     )
+
+
+async def fetch_ensemble_profiles(
+    lat: float, lon: float, *, n_members: int = ENSEMBLE_MEMBERS_AVAILABLE, client=None
+) -> list[WindProfile]:
+    """Fetch real Open-Meteo GFS-ensemble wind profiles, one per member.
+
+    Same pressure levels and geopotential-height reduction as `fetch_profile`,
+    pulled from the ensemble endpoint's per-member fields:
+    `windspeed_{hpa}hPa` is the unsuffixed control member, `..._memberNN` (01..30)
+    are the 30 perturbed members. This is the true-ensemble replacement for
+    `ensemble.perturb_profile`'s synthetic jitter -- same downstream shape
+    (`list[WindProfile]`), so `ensemble.run_ensemble` needs no changes.
+
+    A pressure level is included only if the CONTROL member has data there
+    (mirrors `fetch_profile`'s below-terrain skip, so every returned profile
+    shares one common height axis -- required because `ensemble.run_ensemble`
+    advects every member over the same `heights_m` array). If an individual
+    perturbed member is unexpectedly missing a value at a level the control
+    has (terrain masking is member-independent at a fixed lat/lon, so this
+    should not occur in practice), that member falls back to the control's
+    reading at that level rather than desynchronizing the arrays.
+
+    `n_members` is capped at `ENSEMBLE_MEMBERS_AVAILABLE` (31: 1 control + 30
+    perturbed -- see that constant's docstring). `client` is an optional
+    httpx.AsyncClient (injectable for tests).
+    """
+    import httpx
+
+    n_members = max(1, min(n_members, ENSEMBLE_MEMBERS_AVAILABLE))
+    member_suffixes = [""] + [f"_member{i:02d}" for i in range(1, n_members)]
+
+    hourly_vars = []
+    for hpa in _STD_LEVELS_HPA:
+        hourly_vars += [
+            f"windspeed_{hpa}hPa",
+            f"winddirection_{hpa}hPa",
+            f"geopotential_height_{hpa}hPa",
+        ]
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ",".join(hourly_vars),
+        "models": ENSEMBLE_MODEL,
+        "wind_speed_unit": "ms",
+        "forecast_days": 1,
+    }
+
+    owns_client = client is None
+    if owns_client:
+        client = httpx.AsyncClient(timeout=20.0)
+    try:
+        resp = await client.get(ENSEMBLE_ENDPOINT, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    hourly = data["hourly"]
+    idx = 0  # current hour
+
+    # Levels present for the CONTROL member define the shared height axis
+    # every member's arrays get aligned to (see docstring).
+    levels = []
+    for hpa, std_h in zip(_STD_LEVELS_HPA, _STD_HEIGHTS_M):
+        sp = hourly.get(f"windspeed_{hpa}hPa", [None])[idx]
+        dr = hourly.get(f"winddirection_{hpa}hPa", [None])[idx]
+        if sp is None or dr is None:
+            continue
+        gh = hourly.get(f"geopotential_height_{hpa}hPa", [None])[idx]
+        levels.append((hpa, gh if gh is not None else std_h, sp, dr))
+
+    heights = np.asarray([h for _, h, _, _ in levels], dtype=float)
+    order = np.argsort(heights)
+
+    profiles = []
+    for suffix in member_suffixes:
+        speeds, dirs = [], []
+        for hpa, _h, control_sp, control_dr in levels:
+            sp = hourly.get(f"windspeed_{hpa}hPa{suffix}", [None])[idx]
+            dr = hourly.get(f"winddirection_{hpa}hPa{suffix}", [None])[idx]
+            speeds.append(control_sp if sp is None else sp)
+            dirs.append(control_dr if dr is None else dr)
+        profiles.append(
+            WindProfile(
+                height_m=heights[order],
+                speed_ms=np.asarray(speeds, dtype=float)[order],
+                direction_deg=np.asarray(dirs, dtype=float)[order],
+            )
+        )
+    return profiles
