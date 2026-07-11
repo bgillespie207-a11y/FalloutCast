@@ -223,13 +223,17 @@ array ops. Scale: `N_d·N_z ≈ 150` puffs, `dt` 1–5 min, `t_max` ~24–48 h �
    now models the refractory (volume ∝ d³) / volatile (surface ∝ d²) split
    structurally (see its module docstring for the derivation), opt-in via
    `lognormal_bins(fractionation=...)`. The bulk refractory/volatile activity
-   partition fraction (`F_VOLATILE_PLACEHOLDER`) is still unsourced — a
-   research pass confirmed there isn't a single bulk constant to find:
-   DELFIC's own model (Tompkins 1968, DASA-1800-5) and Miller's 1400°C
-   threshold both resolve this per-nuclide, and Freiling's fractionation
-   formalism is a mass-89/mass-95 ratio correlation, not a lumped fraction.
-   Replacing this placeholder needs the richer per-nuclide model, not a
-   citation — see the code comment for the full trail.
+   partition fraction (`F_VOLATILE_PLACEHOLDER`, still the default at 0.5)
+   has no single sourced bulk value in the literature — DELFIC's own model
+   (Tompkins 1968, DASA-1800-5) and Miller's 1400°C threshold both resolve
+   this per-nuclide, and Freiling's fractionation formalism is a
+   mass-89/mass-95 ratio correlation, not a lumped fraction. A scoped
+   per-nuclide alternative now exists, `sizedist.f_volatile_from_yields()`:
+   4 cross-cited fission-product mass chains (Zr-95/Mo-99 refractory,
+   Sr-90/Cs-137 volatile), combined by yield-weighted average — real sourced
+   data, but still a 4-of-~40-chain, yield- not dose-weighted proxy. See the
+   code comments for the full citation trail and exactly which candidate
+   chains were tried and dropped for insufficient sourcing.
 
 High-confidence, no sourcing needed: US Standard Atmosphere 1976, Sutherland's law,
 Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.

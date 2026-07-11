@@ -121,17 +121,26 @@ behind the same API rather than blocking launch.
   opt-in via `fractionation=`; the refractory/volatile partition coefficient
   itself is a flagged `PLACEHOLDER` pending a sourced DELFIC/Freiling value,
   so fractionated output is directionally validated (structural tests) but
-  not quantitatively calibrated. **Remaining gap 1:** a research pass
-  (2026-07) read DELFIC's actual particle-activity source (Tompkins 1968,
-  DASA-1800-5, per Hooper & Jodoin's 2010 ORNL revision), Miller (1960),
-  and both of Freiling's fractionation reports, and found strong convergent
-  evidence that no single bulk constant exists in the literature to source —
-  every real model (DELFIC's FRATIO, Miller's 1400°C threshold, Freiling's
-  mass-89/mass-95 ratio correlation) resolves fractionation per-nuclide, not
-  as one lumped scalar. Replacing the placeholder would mean implementing
-  that richer per-nuclide model, not citing a number — see
-  `sizedist.F_VOLATILE_PLACEHOLDER`'s comment for the full citation trail.
-  **Remaining gap 2:** footprint validation against a published
+  not quantitatively calibrated by default. **Remaining gap 1, partially
+  addressed:** a research pass (2026-07) read DELFIC's actual particle-
+  activity source (Tompkins 1968, DASA-1800-5, per Hooper & Jodoin's 2010
+  ORNL revision), Miller (1960), and both of Freiling's fractionation
+  reports, and found strong convergent evidence that no single bulk constant
+  exists in the literature to source — every real model (DELFIC's FRATIO,
+  Miller's 1400°C threshold, Freiling's mass-89/mass-95 ratio correlation)
+  resolves fractionation per-nuclide, not as one lumped scalar. A follow-up
+  pass implemented a SCOPED per-nuclide alternative,
+  `sizedist.f_volatile_from_yields()`: 4 fission-product mass chains (Zr-95,
+  Mo-99 refractory; Sr-90, Cs-137 volatile) with cross-verified cumulative
+  U-235 fission yields and literature-cited refractory/volatile
+  classifications, combined by yield-weighted average. Several other
+  candidate chains (89, 91, 97, 131, 140, 141, 143, 144) were tried and
+  dropped rather than guessed — either their yield couldn't be
+  cross-verified or their classification had no explicit citation. This is
+  real sourced data, a genuine upgrade over the placeholder, but still a
+  4-chain, yield-weighted (not dose-weighted) proxy — `F_VOLATILE_PLACEHOLDER`
+  (0.5) remains the default; see `sizedist.py` for the full citation trail
+  on both. **Remaining gap 2:** footprint validation against a published
   DELFIC/HYSPLIT case has first-pass digitized targets for two historical
   cases now (`falloutcast/validation/`), not just scaffolding. Small Boy:
   real historical wind (DNA 1251-1-EX Table 109) and 3 points hand-traced

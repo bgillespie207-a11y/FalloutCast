@@ -26,12 +26,13 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
       distribution grounded in DELFIC (σ_ln ≈ ln 2)**
 - [x] **Ensemble uncertainty band: P(dose ≥ level) across wind members**
 - [x] FastAPI: `/plume` (tier 0/1), `/ensemble`, `/dose`, `/exchange`, `/targets`, `/health`
-- [x] 57-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
+- [x] 62-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
 - [x] DELFIC-style fractionation rule for activity-vs-size (refractory/volume
-      vs volatile/surface split, opt-in); partition fraction still a flagged
-      PLACEHOLDER — a research pass confirmed no single bulk constant exists
-      to source (DELFIC/Miller/Freiling all resolve this per-nuclide), so
-      closing this needs a richer model, not a citation, see `sizedist.py`
+      vs volatile/surface split, opt-in). `F_VOLATILE_PLACEHOLDER` (0.5,
+      illustrative) remains the default; `f_volatile_from_yields()` is a
+      real, sourced, per-nuclide alternative (4 fission-product mass chains,
+      yield-weighted, cross-cited) — still a partial proxy, not a true
+      dose-weighted DELFIC-equivalent, see `sizedist.py`
 - [x] `/ensemble` runs real Open-Meteo GFS-ensemble wind members (31: control +
       30 perturbed), falling back to synthetic perturbation only if the
       ensemble fetch fails
