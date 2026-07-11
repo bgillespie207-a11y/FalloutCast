@@ -110,18 +110,23 @@ behind the same API rather than blocking launch.
 - **M1 (done):** Tier-1 multi-layer advection (atmosphere + Best-number fall
   velocity + lognormal bins + puff advection); `/plume?tier=1`; aloft-fraction
   reporting; shear-curvature capability test.
-- **M1.5 (mostly done):** ensemble-wind uncertainty band — `/ensemble` runs
-  Tier-1 over perturbed members and contours P(dose ≥ level) at 10/50/90%;
-  `/dose` time-evolution endpoint; dose calibrated to Glasstone & Dolan and size
+- **M1.5 (done, with two flagged gaps):** ensemble-wind uncertainty band —
+  `/ensemble` runs Tier-1 over real Open-Meteo GFS-ensemble members (31:
+  control + 30 perturbed; falls back to synthetic perturbation only if that
+  fetch fails) and contours P(dose ≥ level) at 10/50/90%; `/dose`
+  time-evolution endpoint; dose calibrated to Glasstone & Dolan and size
   distribution grounded in DELFIC (σ_ln ≈ ln 2). DELFIC-style fractionation
   rule (refractory/volume ∝ d³ vs volatile/surface ∝ d² activity split) is
   implemented in `sizedist.py` behind the existing `SizeBins` interface,
   opt-in via `fractionation=`; the refractory/volatile partition coefficient
   itself is a flagged `PLACEHOLDER` pending a sourced DELFIC/Freiling value,
   so fractionated output is directionally validated (structural tests) but
-  not quantitatively calibrated. **Remaining:** source that coefficient, and
-  swap perturbed members for true Open-Meteo ensemble members (fetch-layer
-  change).
+  not quantitatively calibrated. **Remaining gap 1:** source that
+  coefficient. **Remaining gap 2:** footprint validation against a published
+  DELFIC/HYSPLIT case is scaffolding-only (`falloutcast/validation/`) — no
+  confirmed surface-burst historical case, machine-usable target footprint,
+  or historical wind fetch was found; see TIER1_SPEC.md §9.7 for exactly
+  what's missing.
 - **M2:** Exchange national max-envelope dose surface (shared CONUS grid,
   precompute-per-target-then-composite, aggressive per-met-run caching).
 - **M3:** Optional HYSPLIT Tier-2 backend behind the same `/plume` contract.

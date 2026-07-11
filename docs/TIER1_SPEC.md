@@ -265,6 +265,20 @@ Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
    should resemble Tier-0's order of magnitude and reach (sanity, not identity).
 7. **Footprint validation.** Compare one case against a published DELFIC or HYSPLIT
    footprint for shape/scale before trusting Tier-1 shapes in the UI.
+   **Status: scaffolding only, not done.** `falloutcast/validation/
+   reference_cases.py` documents a research pass that assembled a candidate
+   case (Small Boy, 1962-07-14 NTS) but hit three blockers before it could
+   become a real assertion: no independently-confirmed surface burst among
+   the historical shots with published DELFIC/HYSPLIT comparisons (most are
+   tower shots -- a physical mismatch with this project's surface-burst-only
+   model), no machine-usable target footprint number (only qualitative
+   accuracy scores and figures in the one study located), and no automated
+   historical-wind source (Open-Meteo's ERA5 archive covers 1962 but doesn't
+   expose pressure-level wind fields). `scripts/validate_footprint.py` runs
+   the harness against a placeholder wind for a structural smoke check;
+   `tests/test_footprint_validation_harness.py` tests the harness code only,
+   not the physics. See that module's docstring for exactly what a future
+   contributor needs to source to close this out.
 
 ## 10. Open decisions (your call)
 
