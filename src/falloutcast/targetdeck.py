@@ -228,6 +228,50 @@ def high_value_targets() -> list[Target]:
     ]
 
 
+# --- Per-target-class yields -------------------------------------------------
+# Representative (yield_mt, fission_fraction) per target category, so the
+# national envelope produces footprints that differ by target class rather than
+# one uniform yield everywhere. This is DESCRIPTIVE modeling (a silo gets a
+# counterforce-appropriate warhead, a city a countervalue-scale surface burst),
+# NOT weaponeering/yield-optimization -- the PRD non-goal is about anything that
+# increases lethality, which picking a representative public yield per class
+# does not.
+#
+# Sourcing, honestly:
+#   * Silos/LCCs at 0.30 Mt are grounded: the W87 on Minuteman III is ~300 kt
+#     and the W78 ~335-350 kt -- 0.30 Mt is a real, public, representative
+#     counterforce RV yield, not a guess.
+#   * The other classes are ILLUSTRATIVE, order-of-magnitude public values
+#     (hardened C2 / countervalue on the higher ~0.5 Mt tier, other military
+#     installations on the ~0.3 Mt tier), in the same "labeled, not surveyed"
+#     spirit as the silo coordinates above. Fission fraction is held at the
+#     project's 0.5 default everywhere -- varying it per class has no sourced
+#     basis, so it isn't invented here.
+_DEFAULT_YIELD_MT = 0.30
+_DEFAULT_FISSION = 0.5
+
+CATEGORY_YIELD: dict[str, tuple[float, float]] = {
+    # (yield_mt, fission_fraction)
+    "icbm_lf": (0.30, 0.5),          # W87/W78-class RV (~300-350 kt), sourced
+    "icbm_lcc": (0.30, 0.5),
+    "bomber_base": (0.30, 0.5),
+    "ssbn_base": (0.30, 0.5),
+    "storage": (0.30, 0.5),
+    "command": (0.50, 0.5),          # hardened C2 -> higher tier (illustrative)
+    "city_population": (0.50, 0.5),  # countervalue surface burst (illustrative)
+    "industry": (0.50, 0.5),         # (illustrative)
+}
+
+# Largest per-class yield, so callers can size a plume-reach window (the
+# envelope's local-evaluation radius) that stays safe for every class.
+MAX_CATEGORY_YIELD_MT = max(y for y, _ in CATEGORY_YIELD.values())
+
+
+def yield_for(category: str) -> tuple[float, float]:
+    """Representative (yield_mt, fission_fraction) for a target category."""
+    return CATEGORY_YIELD.get(category, (_DEFAULT_YIELD_MT, _DEFAULT_FISSION))
+
+
 # --- Assembly ----------------------------------------------------------------
 # The three single `icbm_field` points in targets.py (Warren/Malmstrom/Minot)
 # are superseded by the generated fields, so they're dropped from the expanded

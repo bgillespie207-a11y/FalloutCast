@@ -92,31 +92,42 @@
             </fieldset>
           </div>
 
-          <label
-            >Yield (Mt)
-            <input type="number" id="yield_mt" step="any" min="0.001" value="0.3" required />
-          </label>
-          <!-- Input shortcuts only, not claimed weapon data: round numbers
-          spanning the tactical-to-strategic range. -->
-          <div class="preset-row" role="group" aria-label="Yield presets">
-            <button type="button" class="preset" data-yield="0.01">10 kt</button>
-            <button type="button" class="preset" data-yield="0.1">100 kt</button>
-            <button type="button" class="preset" data-yield="0.3">300 kt</button>
-            <button type="button" class="preset" data-yield="1">1 Mt</button>
-            <button type="button" class="preset" data-yield="5">5 Mt</button>
+          <!-- Global yield/fission apply to the single-plume view. In full-
+          exchange mode the envelope uses per-target-class yields server-side
+          (see targetdeck.CATEGORY_YIELD), so these are hidden and a summary
+          note is shown instead. -->
+          <div id="global-yield-fields">
+            <label
+              >Yield (Mt)
+              <input type="number" id="yield_mt" step="any" min="0.001" value="0.3" required />
+            </label>
+            <!-- Input shortcuts only, not claimed weapon data: round numbers
+            spanning the tactical-to-strategic range. -->
+            <div class="preset-row" role="group" aria-label="Yield presets">
+              <button type="button" class="preset" data-yield="0.01">10 kt</button>
+              <button type="button" class="preset" data-yield="0.1">100 kt</button>
+              <button type="button" class="preset" data-yield="0.3">300 kt</button>
+              <button type="button" class="preset" data-yield="1">1 Mt</button>
+              <button type="button" class="preset" data-yield="5">5 Mt</button>
+            </div>
+            <label
+              >Fission fraction
+              <input
+                type="number"
+                id="fission_fraction"
+                step="any"
+                min="0.01"
+                max="1"
+                value="0.5"
+                required
+              />
+            </label>
           </div>
-          <label
-            >Fission fraction
-            <input
-              type="number"
-              id="fission_fraction"
-              step="any"
-              min="0.01"
-              max="1"
-              value="0.5"
-              required
-            />
-          </label>
+          <p id="per-class-note" class="hint" hidden>
+            Envelope uses per-target-class yields: silos/LCCs ~0.30 Mt
+            (W87/W78-class), countervalue &amp; hardened C2 ~0.50 Mt.
+            Illustrative public values, not a targeting product.
+          </p>
           <button type="submit" id="compute-btn">Compute plume</button>
         </form>
 

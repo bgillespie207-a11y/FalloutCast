@@ -333,18 +333,24 @@ _WIND_FETCH_CONCURRENCY = 8
 
 
 async def _build_models_bucketed(
-    tgts: list[Target], yield_mt: float, fission_fraction: float
+    tgts: list[Target], yield_fn
 ) -> tuple[list[tuple[WSEG10, float, float]], list[str]]:
-    """Build one WSEG-10 model per target, sharing a single fetched wind across
-    all targets in the same ~1-degree bucket. Returns (models, failed_names).
+    """Build one WSEG-10 model per target, sharing a single fetched wind
+    *profile* across all targets in the same ~1-degree bucket. Returns
+    (models, failed_names).
 
-    A bucket whose (single, shared) wind fetch fails excludes every target in
-    it from the envelope rather than failing the whole request; those names are
-    returned so the response can report them. Fetches run concurrently under a
-    small semaphore.
+    `yield_fn(target) -> (yield_mt, fission_fraction)` lets each target carry
+    its own yield (e.g. per target class). The expensive part -- the live
+    Open-Meteo fetch -- is done once per bucket; the cheap part --
+    `reduce_profile`, which depends on the yield (via cloud-top height) -- is
+    redone per target, so targets in one bucket can differ in yield while still
+    sharing a single network call.
+
+    A bucket whose wind fetch fails excludes every target in it from the
+    envelope rather than failing the whole request; those names are returned so
+    the response can report them. Fetches run concurrently under a small
+    semaphore.
     """
-    cloud_top_m = cloud_top_height_m(yield_mt)
-
     buckets: dict[tuple[int, int], list[Target]] = defaultdict(list)
     for t in tgts:
         buckets[(round(t.lat / _WIND_BUCKET_DEG), round(t.lon / _WIND_BUCKET_DEG))].append(t)
@@ -364,8 +370,7 @@ async def _build_models_bucketed(
         for attempt in range(2):
             try:
                 async with sem:
-                    profile = await openmeteo.fetch_profile(rlat, rlon)
-                return openmeteo.reduce_profile(profile, cloud_top_m)
+                    return await openmeteo.fetch_profile(rlat, rlon)
             except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
                 last_exc = exc
                 if attempt == 0:
@@ -383,10 +388,12 @@ async def _build_models_bucketed(
         if isinstance(res, Exception):
             failed.extend(m.name for m in members)
             continue
-        eff = res
+        profile = res
         for t in members:
+            y_mt, ff = yield_fn(t)
+            eff = openmeteo.reduce_profile(profile, cloud_top_height_m(y_mt))
             model = WSEG10(
-                yield_mt=yield_mt, fission_fraction=fission_fraction,
+                yield_mt=y_mt, fission_fraction=ff,
                 wind_mph=eff.speed_mph, wind_dir_deg=eff.bearing_deg,
                 shear_mph_per_kft=eff.shear_mph_per_kft,
             )
@@ -396,7 +403,10 @@ async def _build_models_bucketed(
 
 @app.post("/exchange/envelope", response_model=ExchangeEnvelopeResponse)
 async def exchange_envelope(
-    yield_mt: float = 0.3, fission_fraction: float = 0.5, expanded: bool = True
+    yield_mt: float = 0.3,
+    fission_fraction: float = 0.5,
+    expanded: bool = True,
+    per_class: bool = True,
 ) -> ExchangeEnvelopeResponse:
     """True national max-envelope dose surface (PRD.md M2).
 
@@ -412,6 +422,13 @@ async def exchange_envelope(
     curated high-value targets (see targetdeck.py) -- ~500+ ground zeros.
     `expanded=false` keeps the original 10-installation set.
 
+    `per_class=true` (default) gives each target a representative yield for its
+    class (silos ~0.30 Mt W87-class, countervalue/hardened-C2 ~0.50 Mt; see
+    `targetdeck.CATEGORY_YIELD`) so footprints differ by target type. In that
+    mode the `yield_mt`/`fission_fraction` query params are ignored. Set
+    `per_class=false` to force one uniform `yield_mt`/`fission_fraction` across
+    every target (the original behavior).
+
     Winds are fetched per ~1-degree bucket, concurrently, and shared across
     targets in a bucket (see `_build_models_bucketed`); a bucket whose wind
     fetch fails excludes its targets (not fatal) and they're named in notes.
@@ -421,13 +438,19 @@ async def exchange_envelope(
     """
     tgts = targetdeck.load_expanded_targets() if expanded else targets_mod.load_targets()
 
-    models, failed = await _build_models_bucketed(tgts, yield_mt, fission_fraction)
+    if per_class:
+        yield_fn = lambda t: targetdeck.yield_for(t.category)  # noqa: E731
+    else:
+        yield_fn = lambda t: (yield_mt, fission_fraction)  # noqa: E731
+
+    models, failed = await _build_models_bucketed(tgts, yield_fn)
     if not models:
         raise HTTPException(status_code=502, detail="wind fetch failed for all targets")
 
     # Full grid for the small set (exact, cheap); local-window path for the big
-    # deck (bounded cost per target).
-    radius = 8.0 if expanded else None
+    # deck (bounded cost per target). Sized comfortably beyond the reach of the
+    # largest yield in play so no plume tail is clipped.
+    radius = 10.0 if expanded else None
     g = grid.sample_envelope(models, radius_deg=radius)
     gj = contour.to_geojson_lonlat(g)
 
@@ -435,6 +458,14 @@ async def exchange_envelope(
         f"Max H+1 dose rate at each point from any of {len(models)} ground zeros, "
         "on one shared CONUS grid -- not a per-target overlay.",
     ]
+    if per_class:
+        notes.append(
+            "Per-target-class yields: silos/LCCs ~0.30 Mt (W87/W78-class RV), "
+            "countervalue and hardened C2 ~0.50 Mt; illustrative public values, "
+            "not a targeting product (see targetdeck.CATEGORY_YIELD)."
+        )
+    else:
+        notes.append(f"Uniform {yield_mt:g} Mt across all targets.")
     if expanded:
         notes.append(
             "Deck includes the three Minuteman fields resolved to individual "
@@ -446,7 +477,9 @@ async def exchange_envelope(
         shown = ", ".join(failed[:5]) + (f", +{len(failed) - 5} more" if len(failed) > 5 else "")
         notes.append(f"Excluded {len(failed)} target(s) with failed wind fetch: {shown}.")
 
+    # Reported yield: the uniform value, or the class span when per-class.
+    reported_yield = 0.0 if per_class else yield_mt
     return ExchangeEnvelopeResponse(
-        yield_mt=yield_mt, fission_fraction=fission_fraction, n_targets=len(models),
+        yield_mt=reported_yield, fission_fraction=fission_fraction, n_targets=len(models),
         disclaimer=DISCLAIMER, notes=notes, contours=gj,
     )

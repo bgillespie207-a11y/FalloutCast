@@ -65,6 +65,8 @@ const zipInput = document.getElementById("zip") as HTMLInputElement;
 const zipLookupBtn = document.getElementById("zip-lookup-btn") as HTMLButtonElement;
 const exchangeModeCheckbox = document.getElementById("exchange-mode") as HTMLInputElement;
 const singleTargetFields = document.getElementById("single-target-fields") as HTMLElement;
+const globalYieldFields = document.getElementById("global-yield-fields") as HTMLElement;
+const perClassNote = document.getElementById("per-class-note") as HTMLElement;
 const yieldInput = document.getElementById("yield_mt") as HTMLInputElement;
 const ffInput = document.getElementById("fission_fraction") as HTMLInputElement;
 const manualWindCheckbox = document.getElementById("manual-wind") as HTMLInputElement;
@@ -91,6 +93,12 @@ const map = new maplibregl.Map({
   zoom: 3.3,
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+// Dev-only escape hatch for debugging map/tile state from the console
+// (map.loaded(), map.isStyleLoaded(), ...) -- module scope hides `map`.
+if (import.meta.env.DEV) {
+  (window as unknown as { __map: maplibregl.Map }).__map = map;
+}
 
 // MapLibre's own `trackResize` only listens for window "resize" events, so a
 // container that reaches its final flexbox-computed size without the window
@@ -253,6 +261,10 @@ async function lookupZip(): Promise<void> {
 
 exchangeModeCheckbox.addEventListener("change", () => {
   singleTargetFields.hidden = exchangeModeCheckbox.checked;
+  // Global yield/fission drive only the single-plume view; the envelope uses
+  // per-target-class yields server-side, so swap the input for a summary note.
+  globalYieldFields.hidden = exchangeModeCheckbox.checked;
+  perClassNote.hidden = !exchangeModeCheckbox.checked;
   computeBtn.textContent = exchangeModeCheckbox.checked
     ? "Compute national envelope"
     : "Compute plume";

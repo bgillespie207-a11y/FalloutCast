@@ -100,6 +100,28 @@ npm --prefix web run dev            # http://localhost:5173
 
 Tick **"Full nuclear exchange"** → **Compute national envelope**.
 
+## Per-target-class yields (done)
+
+Each target now carries a representative yield for its class instead of one
+uniform value, so footprints differ by target type (`targetdeck.CATEGORY_YIELD`,
+`?per_class=true`, the envelope default):
+
+- **Silos / LCCs → 0.30 Mt.** Grounded, not invented: the W87 on Minuteman III
+  is ~300 kt and the W78 ~335–350 kt.
+- **Countervalue (population, industry) and hardened C2 → 0.50 Mt.**
+  Illustrative order-of-magnitude public values, same "labeled, not surveyed"
+  posture as the silo coordinates.
+- Fission fraction held at the project's 0.5 default (varying it per class has
+  no sourced basis).
+
+This is *descriptive* modeling (a class-appropriate warhead per target), not
+weaponeering/yield-optimization. Mechanically: the bucketed wind fetch now
+returns the raw profile per bucket and `reduce_profile` (which depends on yield
+via cloud-top height) is redone per target, so targets in one bucket can differ
+in yield while still sharing one network call. `?per_class=false` restores a
+single uniform yield. The frontend hides the global yield input in exchange mode
+and shows the per-class summary instead.
+
 ## Still worth improving (ranked)
 
 1. **No caching.** Every envelope call re-fetches all wind buckets and
@@ -107,11 +129,7 @@ Tick **"Full nuclear exchange"** → **Compute national envelope**.
    "cache on `(bucket, met_run)`" is still the right next step — GFS refreshes
    ~4×/day, so keying to the run (not wall-clock) would make repeat/concurrent
    calls near-instant. This is the single highest-leverage follow-up.
-2. **Per-target yield is uniform.** All 537 ground zeros use the one form-level
-   yield. Real decks vary warhead yield by target class (silos vs. cities).
-   Add an optional `yield_mt`/`fission_fraction` per category (or per target)
-   in `targetdeck.py` and thread it through `_build_models_bucketed`.
-3. **Silo coordinates are synthetic** (see honesty note). If a real product is
+2. **Silo coordinates are synthetic** (see honesty note). If a real product is
    wanted, swap in a sourced LF coordinate set and drop the seeding.
 4. **Bucket wind is a shared approximation.** One profile per ~1° cell is fine
    for the transport-scale wind of a dense field, but coastal HVTs sharing a
