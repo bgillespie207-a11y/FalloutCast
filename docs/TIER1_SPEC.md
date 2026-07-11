@@ -266,35 +266,46 @@ Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
 7. **Footprint validation.** Compare one case against a published DELFIC or HYSPLIT
    footprint for shape/scale before trusting Tier-1 shapes in the UI.
    **Status: scaffolding with a first-pass digitized target, not yet a
-   validation.** `falloutcast/validation/reference_cases.py` documents four
-   research passes assembling a candidate case (Small Boy, 1962-07-14, NTS
-   Area 5). Progress:
-   - **Wind: CLOSED.** `small_boy_wind_h5min()` digitizes a real balloon/
-     tower sounding straight from the primary source (DNA 1251-1-EX Vol. I,
-     Table 109) -- not a placeholder.
-   - **Burst height: precisely sourced, still a mismatch.** Confirmed (both
-     the primary source's "Tower, over Nevada soil" and an independent
-     secondary shot table agree) as a ~3 m tower/stand, not this project's
-     assumed HOB=0. None of the other historical shots with published
-     DELFIC/HYSPLIT comparisons are true surface bursts either (mostly
-     300-700 ft tower shots).
-   - **Target footprint: started.** `SMALL_BOY_DIGITIZED_POINTS` -- 3 points
-     hand-traced from the primary source's own scanned contour figures
-     (DNA 1251-1-EX Figs. 329/331/332, fetched as page images via
+   validation.** `falloutcast/validation/reference_cases.py` documents five
+   research passes assembling TWO candidate cases. Progress:
+   - **Wind: CLOSED, for both cases.** `small_boy_wind_h5min()` and
+     `little_feller_ii_wind_hhour()` digitize real balloon/tower soundings
+     straight from the primary source (DNA 1251-1-EX Vol. I, Tables 109 and
+     107) -- not placeholders.
+   - **Burst height: two data points, neither a clean match, one severe
+     tradeoff discovered.** Small Boy (1962-07-14, NTS Area 5): confirmed
+     ~3 m (9.8 ft) tower/stand, not this project's assumed HOB=0. Little
+     Feller II (1962-07-07, NTS Area 18), added in a fifth pass: confirmed
+     HEIGHT OF BURST = 3 FT (0.91 m), ~3x closer to HOB=0 than Small Boy --
+     but its 22-ton yield is far enough outside WSEG-10's designed range
+     that `wseg10.cloud_center_height_kft` returns a NEGATIVE cloud height
+     for it (a property of Hanifen 1980's empirical fit extrapolating past
+     its calibrated range, not a bug in this repo). Consequence: Tier-1
+     cannot be meaningfully run on Little Feller II at all with the current
+     cloud-height source. Better HOB match, unusable yield; Small Boy
+     remains the only case Tier-1 can actually simulate.
+   - **Target footprint: started, for both cases.** `SMALL_BOY_DIGITIZED_POINTS`
+     -- 3 points hand-traced from the primary source's own scanned contour
+     figures (DNA 1251-1-EX Figs. 329/331/332, fetched as page images via
      archive.org, not just OCR text) -- give real (x_mi, y_mi) coordinates
      and R/hr levels, not just prose. Notably, all 3 independently-traced
      bearings (41-52 deg from GZ) agree with each other, with the source's
      own prose ("as far as western Nebraska," ~58 deg), and with Tier-1's
      own modeled bearing against the real wind (~67 deg) -- a real, unforced
-     signal. This is still a hand-digitization from a low-resolution scan
-     (see each point's `note` for confidence), not a full contour polygon,
-     and `tests/test_footprint_validation_harness.py`'s one bearing check
-     against it uses a deliberately wide (+-45 deg) tolerance band -- a
-     gross-error check, not a precision validation.
+     signal. `LITTLE_FELLER_II_DIGITIZED_POINTS` has one point too (from a
+     notably clearer-printed figure), kept for whoever fixes the
+     cloud-height gap -- there is currently no Tier-1 output to compare it
+     against. All digitization here is hand-tracing from a low-resolution
+     scan (see each point's `note` for confidence), not a full contour
+     polygon, and the one bearing check in the test suite uses a
+     deliberately wide (+-45 deg) tolerance band -- a gross-error check, not
+     a precision validation.
 
    `tests/test_footprint_validation_harness.py` tests the harness code
-   (including the real wind digitization) but still asserts no physics
-   claim -- see the module docstring for exactly what's left.
+   (including both real wind digitizations) and directly documents the
+   Little Feller II cloud-height limitation as its own test, rather than
+   working around it silently -- see the module docstring for exactly
+   what's left.
 
 ## 10. Open decisions (your call)
 

@@ -123,17 +123,18 @@ behind the same API rather than blocking launch.
   so fractionated output is directionally validated (structural tests) but
   not quantitatively calibrated. **Remaining gap 1:** source that
   coefficient. **Remaining gap 2:** footprint validation against a published
-  DELFIC/HYSPLIT case has a first-pass digitized target now
-  (`falloutcast/validation/`), not just scaffolding. A real historical wind
-  (DNA 1251-1-EX Table 109) and 3 points hand-traced from the primary
-  source's own scanned contour figures replaced the earlier placeholder/
-  prose-only state; all 3 points' bearings (41-52°) independently agree with
-  each other and roughly with Tier-1's own modeled bearing (~67°) against
-  that real wind. Still not a full digitized contour or a tight validation —
-  the points are hand-traced from a low-resolution scan, and burst height (a
-  confirmed ~3 m tower shot) remains a confirmed mismatch with this
-  project's surface-burst-only model. See TIER1_SPEC.md §9.7 for exactly
-  what's missing.
+  DELFIC/HYSPLIT case has first-pass digitized targets for two historical
+  cases now (`falloutcast/validation/`), not just scaffolding. Small Boy:
+  real historical wind (DNA 1251-1-EX Table 109) and 3 points hand-traced
+  from the primary source's own scanned contour figures, all independently
+  agreeing on bearing (41-52°) with each other and roughly with Tier-1's own
+  modeled bearing (~67°). Little Feller II: a much closer burst-height match
+  (3 ft vs. Small Boy's 9.8 ft) with its own real wind and digitized point —
+  but its 22-ton yield is far enough outside WSEG-10's designed range that
+  the cloud-height formula returns a negative value for it, a genuine model
+  limitation (not a bug) documented directly in the test suite rather than
+  worked around. Neither case is a full digitized contour or a tight
+  validation. See TIER1_SPEC.md §9.7 for exactly what's missing.
 - **M2:** Exchange national max-envelope dose surface (shared CONUS grid,
   precompute-per-target-then-composite, aggressive per-met-run caching).
 - **M3:** Optional HYSPLIT Tier-2 backend behind the same `/plume` contract.

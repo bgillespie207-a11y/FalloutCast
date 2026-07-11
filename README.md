@@ -26,19 +26,23 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
       distribution grounded in DELFIC (σ_ln ≈ ln 2)**
 - [x] **Ensemble uncertainty band: P(dose ≥ level) across wind members**
 - [x] FastAPI: `/plume` (tier 0/1), `/ensemble`, `/dose`, `/exchange`, `/targets`, `/health`
-- [x] 54-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
+- [x] 57-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
 - [x] DELFIC-style fractionation rule for activity-vs-size (refractory/volume
       vs volatile/surface split, opt-in); partition fraction still a flagged
       PLACEHOLDER pending a sourced DELFIC/Freiling value
 - [x] `/ensemble` runs real Open-Meteo GFS-ensemble wind members (31: control +
       30 perturbed), falling back to synthetic perturbation only if the
       ensemble fetch fails
-- [ ] Footprint validation: scaffolding with a first-pass digitized target
-      (`falloutcast/validation/`) -- real historical wind (DNA 1251-1-EX
-      Table 109) and 3 hand-traced target points from the source's own
-      contour figures, all independently agreeing on bearing (~41-52° vs.
-      model's ~67°); still not a full contour, and a confirmed burst-height
-      mismatch remains, see TIER1_SPEC.md §9.7
+- [ ] Footprint validation: scaffolding with first-pass digitized targets for
+      2 historical cases (`falloutcast/validation/`) -- real historical
+      winds (DNA 1251-1-EX Tables 109 & 107) and hand-traced target points
+      from the source's own contour figures; Small Boy's 3 points
+      independently agree on bearing (~41-52° vs. model's ~67°). Little
+      Feller II has a much closer burst-height match (3 ft vs. 9.8 ft) but
+      its tiny 22-ton yield breaks WSEG-10's cloud-height formula
+      (goes negative) — a real, documented model limitation, not run
+      through Tier-1. Still not a full contour for either case, see
+      TIER1_SPEC.md §9.7
 - [ ] Exchange mode: true national max-envelope dose surface
 - [ ] Web map frontend (MapLibre + deck.gl)
 
