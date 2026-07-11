@@ -1,13 +1,15 @@
 """Structural test of the footprint-validation harness plumbing.
 
-This does NOT validate Tier-1's physics against a real footprint -- there is
-still no sourced target contour to check against (see
-`falloutcast.validation.reference_cases` module docstring: burst-height
-mismatch and no digitized target footprint are still open; the historical
-wind gap IS closed, real data digitized from the primary source). Most tests
-here use a synthetic wind profile (explicitly not a claim about any real
-historical wind) to test the harness code path in isolation; one test below
-exercises the real digitized Small Boy sounding specifically.
+This still does NOT tightly validate Tier-1's physics against a real
+footprint -- the target points in `SMALL_BOY_DIGITIZED_POINTS` are hand-traced
+from a low-resolution 1970s photocopy scan (approximate by construction,
+see each point's `note`), and the burst-height mismatch (module docstring,
+gap 1) means even a perfect match wouldn't be a clean validation. What CAN
+be asserted honestly: the harness code runs correctly (most tests below, via
+a synthetic wind profile), and the model's own bearing lands in the same
+broad compass quadrant as the independently-traced digitized points when run
+against the real historical wind -- a loose sanity bound wide enough to
+reflect the real uncertainty here, not a precision check.
 """
 
 import numpy as np
@@ -83,7 +85,7 @@ def test_small_boy_wind_h5min_shape_and_units():
 def test_run_case_with_real_small_boy_wind_is_finite_and_bounded():
     """End-to-end integration of the real digitized sounding through
     run_case -- not a physics validation (see module docstring: still no
-    target contour), just confirms the real-data path produces sane,
+    tight target), just confirms the real-data path produces sane,
     finite, non-crashing output the way the synthetic-wind tests above do."""
     heights_m, u, v = ref.small_boy_wind_h5min()
     result = ref.run_case(
@@ -93,3 +95,67 @@ def test_run_case_with_real_small_boy_wind_is_finite_and_bounded():
     assert np.isfinite(result.downwind_reach_miles)
     assert result.downwind_reach_miles > 0
     assert 0.0 <= result.fraction_aloft <= 1.0
+
+
+def test_digitized_contour_point_bearing_and_distance_math():
+    """Regression check on DigitizedContourPoint's derived properties --
+    plain trigonometry (x=east, y=north convention matching
+    weather.openmeteo._dir_to_uv), verified against hand-computed values for
+    a simple case so a future refactor can't silently flip x/y or the
+    arctan2 argument order without a test catching it."""
+    p = ref.DigitizedContourPoint(
+        label="test", x_mi=3.0, y_mi=4.0, dose_rate_rhr=1.0,
+        source_figure="n/a", note="n/a",
+    )
+    assert p.distance_mi == pytest.approx(5.0)
+    assert p.bearing_deg == pytest.approx(36.87, abs=0.01)  # atan2(3,4)
+
+    due_north = ref.DigitizedContourPoint(
+        label="test", x_mi=0.0, y_mi=10.0, dose_rate_rhr=1.0,
+        source_figure="n/a", note="n/a",
+    )
+    assert due_north.bearing_deg == pytest.approx(0.0)
+
+    due_east = ref.DigitizedContourPoint(
+        label="test", x_mi=10.0, y_mi=0.0, dose_rate_rhr=1.0,
+        source_figure="n/a", note="n/a",
+    )
+    assert due_east.bearing_deg == pytest.approx(90.0)
+
+
+def test_digitized_points_are_documented_and_ordered_by_distance():
+    """Each digitized point must carry its sourcing note (rule 1/2: no
+    unsourced numbers presented as fact), and -- since all three were traced
+    off figures at increasing map scale (29mi, 300mi, 300mi) representing
+    increasingly far features of the same plume -- their distances should be
+    monotonically increasing in the order captured. This would catch a
+    transposed x_mi/y_mi typo between points."""
+    points = ref.SMALL_BOY_DIGITIZED_POINTS
+    assert len(points) >= 3
+    for p in points:
+        assert len(p.note) > 20, f"{p.label} note looks unpopulated"
+        assert len(p.source_figure) > 5
+    distances = [p.distance_mi for p in points]
+    assert distances == sorted(distances)
+
+
+def test_model_bearing_lands_in_same_quadrant_as_digitized_points():
+    """Loose sanity bound, not a validation: run Tier-1 against the real
+    digitized wind and check its hotline bearing falls within a generous
+    +-45 deg band of the digitized points' bearing range. The band is wide
+    on purpose -- the digitized points are hand-traced from a low-resolution
+    scan (+-5-10 deg bearing uncertainty per DigitizedContourPoint's
+    docstring), the wind used is a single H+5min snapshot rather than a full
+    multi-day reconstruction, and the burst-height mismatch (module
+    docstring gap 1) means exact agreement was never expected. This exists
+    to catch a GROSS error (wind sign flip, wrong u/v convention, transposed
+    axes) rather than to claim quantitative footprint validation."""
+    heights_m, u, v = ref.small_boy_wind_h5min()
+    result = ref.run_case(
+        ref.SMALL_BOY_1962, heights_m=heights_m, wind_u_ms=u, wind_v_ms=v,
+        fission_fraction=1.0, t_max_s=48 * 3600.0,
+    )
+    digitized_bearings = [p.bearing_deg for p in ref.SMALL_BOY_DIGITIZED_POINTS]
+    lo, hi = min(digitized_bearings) - 45.0, max(digitized_bearings) + 45.0
+    assert result.hotline_bearing_deg is not None
+    assert lo <= result.hotline_bearing_deg <= hi

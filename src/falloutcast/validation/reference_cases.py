@@ -31,21 +31,32 @@ second pass that pinned down SMALL_BOY_1962's numbers more precisely):
    device, but it is a confirmed, quantified mismatch with HOB=0, not a
    match -- see `height_of_burst_m` and `burst_type_note`.
 
-2. NO MACHINE-USABLE TARGET FOOTPRINT -- partially narrowed, still open. A
-   third research pass located and read the actual DNA 1251-1-EX Vol. I
-   entry for Small Boy (DTIC ADA079309, via archive.org's OCR text -- the
-   PDF itself still 403s to automated fetch, but the plaintext transcription
-   was readable directly). It describes real contour FIGURES (329-332: H+1
-   hour gamma dose-rate contours from close-in out to 300 miles downwind)
-   and gives one genuine quantitative structural fact in prose: fallout
-   "started arriving at 250 to 400 miles downwind... late... D+1 day
-   reaching a peak at D+2 days," tracked by ground monitors "as far as
-   western Nebraska." That's real and usable for an order-of-magnitude
-   reach/timing sanity check (see `run_case` / `scripts/validate_footprint.py`)
-   -- but the figures themselves are scanned plates, not OCR'd as geometry,
-   so there is still no digitized contour polygon or R/hr-vs-distance curve
-   to assert against. Digitizing Figures 329-332 from the actual scanned
-   page images (not just the OCR text) would close this gap; not done here.
+2. NO MACHINE-USABLE TARGET FOOTPRINT -- started, still partial. A fourth
+   research pass fetched the actual scanned page IMAGES for Figures 329-332
+   from archive.org (not just the OCR text -- the plates are graphics, so
+   OCR text alone couldn't carry them; see `_fetch_scan_page` methodology
+   note below) and hand-traced three points by eye against the figures' own
+   printed mile gridlines: `SMALL_BOY_DIGITIZED_POINTS`. This is a real
+   first-pass digitization, not prose -- but it is HAND-TRACED FROM A LOW-
+   RESOLUTION 1970s PHOTOCOPY SCAN, so treat the numbers as approximate
+   (see each point's `note` for what's solid vs. uncertain). The scan
+   resolution was good enough to trace CONTOUR LINE PATHS against the sharp
+   printed gridlines with reasonable confidence, but NOT good enough to
+   reliably read every small typewritten R/hr label where multiple contours
+   cluster close together near GZ -- so only the more isolated, legible
+   labels/points were digitized; the full contour family (0.01 through 1000
+   R/hr) is visible in the source but not fully extracted. A genuinely
+   striking result: three independently-traced points (close-in Fig. 331
+   "0.01 R/hr" line, the Fig. 332 "2 R/hr" plume's far end, and a separate
+   secondary deposition patch far from the main plume) all land at compass
+   bearings 41-52 degrees from GZ -- consistent with EACH OTHER, and with
+   the same report's own prose ("as far as western Nebraska," bearing ~58
+   deg from GZ) and this project's own Tier-1 run against the real wind
+   (bearing ~67 deg, see `scripts/validate_footprint.py`). That agreement is
+   a real, unforced signal, not cherry-picked -- but note gap 1 (burst-height
+   mismatch) and the hand-digitization uncertainty here mean this still
+   isn't a tight quantitative validation, just a much better structural
+   comparison than prose alone.
 
 3. NO HISTORICAL WIND PROFILE -- CLOSED. The same DNA 1251-1-EX entry
    includes Table 109, "NEVADA WIND DATA FOR OPERATION SUNBEAM - SMALL BOY":
@@ -146,13 +157,16 @@ SMALL_BOY_1962 = ReferenceCase(
     footprint_target_note=(
         "Read DNA 1251-1-EX Vol. I directly (DTIC ADA079309, via archive.org "
         "OCR text; the entry starts under 'OPERATION SUNBEAM - Small Boy', "
-        "p.~569 of the scanned volume). Still NO digitized R/hr-vs-distance "
-        "contour or contour-area number -- the actual figures (329: close-in "
-        "GZ contours; 330: H+1 hour contours to 50,000 ft downwind; 331: "
-        "off-site pattern to 29 mi; 332: off-site pattern to 300 mi; 333: "
-        "cloud path to western Nebraska) are scanned plates, not OCR-legible "
-        "as geometry. What IS usable as a rough structural/order-of-magnitude "
-        "check: the report states fallout 'started arriving at 250 to 400 "
+        "p.~569 of the scanned volume). A first-pass digitization of three "
+        "points from the actual figures now exists -- see "
+        "SMALL_BOY_DIGITIZED_POINTS below -- hand-traced from the scanned "
+        "plates (329: close-in GZ contours; 330: H+1 hour contours to 50,000 "
+        "ft downwind; 331: off-site pattern to 29 mi; 332: off-site pattern "
+        "to 300 mi; 333: cloud path to western Nebraska). Still NOT a full "
+        "digitized contour polygon -- only 3 discrete points with "
+        "hand-estimated coordinates, not the whole R/hr-vs-distance family. "
+        "Separately, the report states in prose that fallout 'started "
+        "arriving at 250 to 400 "
         "miles downwind... late... D+1 day reaching a peak at D+2 days,' "
         "tracked by ground monitors 'as far as western Nebraska' (NNE-ish of "
         "NTS). Two other real sourced numbers, neither a footprint target "
@@ -183,7 +197,89 @@ SMALL_BOY_1962 = ReferenceCase(
 )
 
 
-# Real historical wind sounding for Small Boy, H+5 minutes post-burst,
+@dataclass(frozen=True)
+class DigitizedContourPoint:
+    """One hand-digitized point read off a scanned DNA 1251-1-EX contour
+    figure. `distance_mi`/`bearing_deg` are DERIVED from hand-traced
+    (x_mi, y_mi) coordinates read against the figure's own printed mile
+    gridlines (x_mi = "east"-ish, y_mi = "north"-ish per each figure's small
+    drawn compass rose -- the rose's exact tilt off vertical was not
+    separately measured, so treat bearing as accurate to perhaps +-5-10 deg,
+    not survey-grade). `dose_rate_rhr` is None where the line's own
+    typewritten label was legible enough to identify roughly which decade
+    but not confidently read exactly (see `note`).
+    """
+
+    label: str
+    x_mi: float
+    y_mi: float
+    dose_rate_rhr: float | None
+    source_figure: str
+    note: str
+
+    @property
+    def distance_mi(self) -> float:
+        return float(np.hypot(self.x_mi, self.y_mi))
+
+    @property
+    def bearing_deg(self) -> float:
+        return float(np.degrees(np.arctan2(self.x_mi, self.y_mi)) % 360.0)
+
+
+# Hand-traced from archive.org scan images of DNA 1251-1-EX Vol. I (DTIC
+# ADA079309), leaves 0574/0576/0577 (printed pages 570/572/573), fetched via
+# archive.org's BookReaderImages.php page-image endpoint (the PDF itself
+# still blocks automated fetch; archive.org serves the same scan's
+# individual page images without that block). Read 2026-07-10. Each point's
+# (x_mi, y_mi) is a by-eye estimate of where a traced contour line crosses
+# or terminates, read against the figure's own sharp printed gridlines
+# (reliable) -- NOT a claim of survey-grade precision. See
+# DigitizedContourPoint's docstring for the bearing-accuracy caveat.
+SMALL_BOY_DIGITIZED_POINTS = [
+    DigitizedContourPoint(
+        label="close-in contour, upper end",
+        x_mi=15.0, y_mi=17.3, dose_rate_rhr=0.01,
+        source_figure="Fig. 331 (H+1hr, to 29 mi downwind), p.572",
+        note=(
+            "Traced the outermost (steepest, most isolated) dashed contour "
+            "from the GZ cluster to where it exits the plotted area near the "
+            "top edge. Labeled '0.01' at both this point and again lower on "
+            "the same line near the GZ cluster (contour lines in this figure "
+            "are relabeled at multiple points along their length) -- the two "
+            "labels agreeing is a small confidence boost, though both "
+            "readings come from the same blurry font."
+        ),
+    ),
+    DigitizedContourPoint(
+        label="main plume, 2 R/hr contour far end",
+        x_mi=170.0, y_mi=150.0, dose_rate_rhr=2.0,
+        source_figure="Fig. 332 (H+1hr, to 300 mi downwind), p.573",
+        note=(
+            "Traced the '2'-labeled contour from the close-in cluster "
+            "(where it's one of several nested labeled contours: 100, 20, "
+            "10, 4, 2) out to where the source's own dashing indicates "
+            "'uncertainty' near the edge of continuous tracking. This is "
+            "the most confidently read of the three points -- '2' is an "
+            "unambiguous single digit, unlike the decimal labels elsewhere."
+        ),
+    ),
+    DigitizedContourPoint(
+        label="secondary deposition patch, approx. center",
+        x_mi=265.0, y_mi=210.0, dose_rate_rhr=None,
+        source_figure="Fig. 332 (H+1hr, to 300 mi downwind), p.573",
+        note=(
+            "A DISTINCT, DISCONNECTED contour cluster (separate from the "
+            "main plume traced above) appears far downwind, with legible "
+            "labels '4', '10', '20' on its nested contours (exact boundary "
+            "not fully traced, just an eyeballed center of the cluster). "
+            "Real fallout is patchy -- rainout/washout secondary hot spots "
+            "disconnected from the main plume are a well documented "
+            "phenomenon Tier-1's single smooth Gaussian-puff model cannot "
+            "reproduce; this point is here as a real feature of the source "
+            "data, not something to expect Tier-1 to match."
+        ),
+    ),
+]
 # observed at Frenchman's Flat, NTS -- digitized from DNA 1251-1-EX Vol. I,
 # Table 109, "NEVADA WIND DATA FOR OPERATION SUNBEAM - SMALL BOY" (see
 # SMALL_BOY_1962.citation). The table also gives H+15min and H+70min
