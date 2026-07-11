@@ -73,6 +73,50 @@ fieldset {
   margin: 0.3rem 0 0.6rem;
 }
 
+.zip-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.zip-row label {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.zip-row button {
+  width: auto;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-weight: normal;
+}
+
+.checkbox-row input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+}
+
+.exchange-toggle {
+  padding: 0.5rem;
+  margin-bottom: 0.8rem;
+  background: #efe6e0;
+  border: 1px solid #d8b8a8;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+#single-target-fields {
+  margin-bottom: 0.6rem;
+}
+
 button {
   width: 100%;
   padding: 0.5rem;
