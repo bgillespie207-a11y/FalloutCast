@@ -2,18 +2,30 @@
 
 This is a research tool, not a test: see
 `falloutcast.validation.reference_cases` for exactly what is and is not
-sourced about the one candidate case (Small Boy, 1962) assembled so far.
+sourced about the two candidate cases (Small Boy and Little Feller II, both
+1962) assembled so far.
 
-As of the fourth research pass: the wind IS real (`small_boy_wind_h5min()`,
-digitized from DNA 1251-1-EX's Table 109 sounding), and there ARE real
-digitized target points now (`SMALL_BOY_DIGITIZED_POINTS`, hand-traced from
-the source report's own scanned contour figures) -- not just prose. This
-script prints the model's own bearing/reach next to those digitized points
-for a human to eyeball. It still does not assert a pass/fail: the
-digitization is hand-traced from a low-resolution 1970s photocopy (see each
-point's `note` for what's solid vs. approximate), and the burst-height
-mismatch (Small Boy was a ~3 m tower shot, not this model's HOB=0
-assumption) means even close agreement wouldn't be a clean validation.
+Only Small Boy is actually run through Tier-1 here. Its wind is real
+(`small_boy_wind_h5min()`, digitized from DNA 1251-1-EX's Table 109
+sounding), and there are real digitized target points
+(`SMALL_BOY_DIGITIZED_POINTS`, hand-traced from the source report's own
+scanned contour figures) -- not just prose. This script prints the model's
+own bearing/reach next to those digitized points for a human to eyeball. It
+does not assert a pass/fail: the digitization is hand-traced from a
+low-resolution 1970s photocopy (see each point's `note` for what's solid vs.
+approximate), and the burst-height mismatch (Small Boy was a ~3 m tower
+shot, not this model's HOB=0 assumption) means even close agreement
+wouldn't be a clean validation.
+
+Little Feller II has a real digitized wind and contour point too (and a
+much closer HOB match, 3 ft vs 9.8 ft) -- but is deliberately NOT run
+through Tier-1 here: its 22-ton yield pushes WSEG-10's empirical
+cloud-height formula negative (see
+LITTLE_FELLER_II_1962.footprint_target_note and
+tests/test_footprint_validation_harness.py's
+test_little_feller_ii_yield_breaks_the_cloud_height_model). Running it
+anyway would silently simulate on a nonphysical release altitude and print
+a number that looks like an answer but isn't one.
 
 Usage: python scripts/validate_footprint.py
 """
@@ -69,6 +81,13 @@ def main() -> None:
           "holds the top/bottom-level wind constant beyond the sounding's own "
           "3,078-20,000 ft range and for the full 48h simulated, which the "
           "real atmosphere did not do.")
+
+    print()
+    print("=" * 70)
+    lf2 = ref.LITTLE_FELLER_II_1962
+    print(f"=== {lf2.name} ({lf2.date}) -- NOT run through Tier-1, see why ===")
+    print(f"burst type: {lf2.burst_type_note}")
+    print(f"target footprint: {lf2.footprint_target_note}")
 
 
 if __name__ == "__main__":

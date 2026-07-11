@@ -10,12 +10,19 @@ a synthetic wind profile), and the model's own bearing lands in the same
 broad compass quadrant as the independently-traced digitized points when run
 against the real historical wind -- a loose sanity bound wide enough to
 reflect the real uncertainty here, not a precision check.
+
+There is a second case, LITTLE_FELLER_II_1962, with a real digitized wind
+and one digitized contour point but NO run_case() test against it anywhere
+here -- its yield is far enough outside WSEG-10's designed range that the
+cloud-height model goes negative (see
+test_little_feller_ii_yield_breaks_the_cloud_height_model). That's tested
+directly as a documented limitation, not silently worked around.
 """
 
 import numpy as np
 import pytest
 
-from falloutcast.physics import tier1
+from falloutcast.physics import tier1, wseg10
 from falloutcast.validation import reference_cases as ref
 
 H = np.array([100.0, 1500.0, 3000.0, 5500.0, 9000.0, 12000.0])
@@ -56,12 +63,12 @@ def test_run_case_converts_yield_kt_to_mt_correctly():
     assert result.fraction_aloft == direct.fraction_aloft
 
 
-def test_reference_case_fields_document_their_own_uncertainty():
+@pytest.mark.parametrize("case", [ref.SMALL_BOY_1962, ref.LITTLE_FELLER_II_1962])
+def test_reference_case_fields_document_their_own_uncertainty(case):
     """Every field that isn't a hard fact must say so in its own text --
     this is a documentation-completeness check, not a physics check: it
     guards against a future edit silently dropping the uncertainty caveats
     (project rule 2/3) rather than updating them."""
-    case = ref.SMALL_BOY_1962
     for field_name in ("yield_source", "burst_type_note", "fission_fraction_note",
                        "footprint_target_note"):
         text = getattr(case, field_name)
@@ -159,3 +166,31 @@ def test_model_bearing_lands_in_same_quadrant_as_digitized_points():
     lo, hi = min(digitized_bearings) - 45.0, max(digitized_bearings) + 45.0
     assert result.hotline_bearing_deg is not None
     assert lo <= result.hotline_bearing_deg <= hi
+
+
+def test_little_feller_ii_wind_hhour_shape_and_units():
+    """Digitized DNA 1251-1-EX Table 107 sounding (single H-hour column,
+    unlike Small Boy's three-column table): same length across all three
+    returned arrays, heights strictly increasing, and the fastest tabulated
+    leg (13,000 ft, 110 deg, 21.9 mph) converts to the expected ~9.8 m/s."""
+    heights_m, u, v = ref.little_feller_ii_wind_hhour()
+    n = len(ref.LITTLE_FELLER_II_WIND_HHOUR_FT_MSL)
+    assert len(heights_m) == len(u) == len(v) == n
+    assert np.all(np.diff(heights_m) > 0)
+    fast_idx = int(np.argmax(ref.LITTLE_FELLER_II_WIND_HHOUR_SPEED_MPH))
+    fast_speed_ms = np.hypot(u[fast_idx], v[fast_idx])
+    assert fast_speed_ms == pytest.approx(21.9 * 0.44704, rel=1e-3)
+
+
+def test_little_feller_ii_yield_breaks_the_cloud_height_model():
+    """Documents a real, discovered limitation (not a bug in this repo's
+    arithmetic): WSEG-10's empirical cloud-height fit (Hanifen 1980,
+    calibrated to strategic-scale yields) extrapolates to a NEGATIVE center
+    height for Little Feller II's 22-ton yield. This is exactly why
+    LITTLE_FELLER_II_1962 is not run through run_case() anywhere in this
+    suite or in scripts/validate_footprint.py -- doing so would silently
+    simulate on a nonphysical release altitude rather than failing loudly.
+    If a future cloud-height source fixes this, this test will start
+    failing and should be updated (not deleted) to reflect the fix."""
+    h_c_kft = wseg10.cloud_center_height_kft(ref.LITTLE_FELLER_II_1962.yield_kt / 1000.0)
+    assert h_c_kft < 0
