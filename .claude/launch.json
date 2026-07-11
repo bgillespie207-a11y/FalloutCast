@@ -7,9 +7,9 @@
       "runtimeArgs": [
         "PYTHONPATH=/Users/brendangillespie/Downloads/falloutcast/.venv/lib/python3.12/site-packages:/Users/brendangillespie/Downloads/falloutcast/src",
         "python3", "-m", "uvicorn", "falloutcast.api.main:app",
-        "--port", "$PORT"
+        "--port", "8010"
       ],
-      "autoPort": true
+      "port": 8010
     },
     {
       "name": "web",
