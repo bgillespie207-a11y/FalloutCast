@@ -265,9 +265,10 @@ Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
    should resemble Tier-0's order of magnitude and reach (sanity, not identity).
 7. **Footprint validation.** Compare one case against a published DELFIC or HYSPLIT
    footprint for shape/scale before trusting Tier-1 shapes in the UI.
-   **Status: scaffolding only, not a validation.** `falloutcast/validation/
-   reference_cases.py` documents three research passes assembling a
-   candidate case (Small Boy, 1962-07-14, NTS Area 5). Progress:
+   **Status: scaffolding with a first-pass digitized target, not yet a
+   validation.** `falloutcast/validation/reference_cases.py` documents four
+   research passes assembling a candidate case (Small Boy, 1962-07-14, NTS
+   Area 5). Progress:
    - **Wind: CLOSED.** `small_boy_wind_h5min()` digitizes a real balloon/
      tower sounding straight from the primary source (DNA 1251-1-EX Vol. I,
      Table 109) -- not a placeholder.
@@ -277,17 +278,19 @@ Stokes law, Schiller–Naumann / Clift–Gauvin drag, lognormal math.
      assumed HOB=0. None of the other historical shots with published
      DELFIC/HYSPLIT comparisons are true surface bursts either (mostly
      300-700 ft tower shots).
-   - **Target footprint: still no digitized contour**, but no longer
-     nothing -- the primary source's own prose gives a real order-of-
-     magnitude/bearing check (fallout reached 250-400 mi downwind by late
-     D+1, peaking D+2, tracked to western Nebraska). `scripts/
-     validate_footprint.py` runs Tier-1 against the real wind and prints
-     this alongside the model's own bearing/reach for a human to eyeball --
-     bearing came out close (67 deg modeled vs. 58 deg to western Nebraska);
-     reach undershot (129 mi vs. reported 250-400 mi by D+1). The actual
-     contour plates (DNA 1251-1-EX Figures 329-332) are scanned images, not
-     OCR-legible as geometry -- digitizing those from the scan would close
-     this gap for real.
+   - **Target footprint: started.** `SMALL_BOY_DIGITIZED_POINTS` -- 3 points
+     hand-traced from the primary source's own scanned contour figures
+     (DNA 1251-1-EX Figs. 329/331/332, fetched as page images via
+     archive.org, not just OCR text) -- give real (x_mi, y_mi) coordinates
+     and R/hr levels, not just prose. Notably, all 3 independently-traced
+     bearings (41-52 deg from GZ) agree with each other, with the source's
+     own prose ("as far as western Nebraska," ~58 deg), and with Tier-1's
+     own modeled bearing against the real wind (~67 deg) -- a real, unforced
+     signal. This is still a hand-digitization from a low-resolution scan
+     (see each point's `note` for confidence), not a full contour polygon,
+     and `tests/test_footprint_validation_harness.py`'s one bearing check
+     against it uses a deliberately wide (+-45 deg) tolerance band -- a
+     gross-error check, not a precision validation.
 
    `tests/test_footprint_validation_harness.py` tests the harness code
    (including the real wind digitization) but still asserts no physics
