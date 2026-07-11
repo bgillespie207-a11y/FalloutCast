@@ -24,3 +24,9 @@ htmlcov/
 # Local artifacts
 *.log
 /tmp/
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.tsbuildinfo

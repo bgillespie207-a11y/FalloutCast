@@ -17,6 +17,7 @@ POST /exchange/envelope    true national max-envelope dose surface (PRD.md M2):
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .. import contour, grid, targets as targets_mod
 from ..physics import decay, ensemble
@@ -41,6 +42,18 @@ app = FastAPI(
     title="FalloutCast",
     version="0.2.0",
     summary="Weather-driven nuclear fallout visualization (WSEG-10 + multi-layer).",
+)
+
+# The web frontend (web/, M4) is served separately (Vite dev server / static
+# host) from this API, so it needs CORS. Open to any origin: every endpoint
+# here is read-only/side-effect-free (compute a plume, no auth, no user
+# data), so there's nothing a cross-origin request could do that a same-origin
+# one couldn't -- this isn't a credentialed API.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 
