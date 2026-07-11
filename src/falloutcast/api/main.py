@@ -370,7 +370,10 @@ async def _build_models_bucketed(
         for attempt in range(2):
             try:
                 async with sem:
-                    return await openmeteo.fetch_profile(rlat, rlon)
+                    # Cached wrapper: repeat/concurrent envelope calls reuse the
+                    # same per-bucket profile within the met window instead of
+                    # re-hitting Open-Meteo every time.
+                    return await openmeteo.cached_fetch_profile(rlat, rlon)
             except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
                 last_exc = exc
                 if attempt == 0:

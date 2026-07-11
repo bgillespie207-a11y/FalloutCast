@@ -111,3 +111,84 @@ def test_missing_member_value_falls_back_to_control():
     member2 = profiles[2]
     idx_925 = list(profiles[0].height_m).index(760.0)  # 925 hPa -> 760 m
     assert member2.speed_ms[idx_925] == 10.0  # control's value, not NaN/crash
+
+
+# --- cached_fetch_profile ----------------------------------------------------
+
+
+def _fake_profile():
+    return openmeteo.WindProfile(
+        height_m=np.array([110.0]),
+        speed_ms=np.array([10.0]),
+        direction_deg=np.array([270.0]),
+    )
+
+
+def test_cached_fetch_profile_serves_repeat_calls_from_cache(monkeypatch):
+    """A second call for the same point in the same window makes no network
+    call -- this is what makes repeat envelope requests near-instant."""
+    openmeteo.clear_profile_cache()
+    calls = {"n": 0}
+
+    async def fake(lat, lon, *, client=None):
+        calls["n"] += 1
+        return _fake_profile()
+
+    monkeypatch.setattr(openmeteo, "fetch_profile", fake)
+
+    async def run():
+        a = await openmeteo.cached_fetch_profile(41.1, -104.8)
+        b = await openmeteo.cached_fetch_profile(41.1, -104.8)
+        return a, b
+
+    a, b = asyncio.run(run())
+    assert calls["n"] == 1
+    assert a is b
+    openmeteo.clear_profile_cache()
+
+
+def test_cached_fetch_profile_dedupes_concurrent_misses(monkeypatch):
+    """Two concurrent misses for the same key share ONE fetch (no thundering
+    herd), which matters when several targets/buckets resolve at once."""
+    openmeteo.clear_profile_cache()
+    calls = {"n": 0}
+
+    async def fake(lat, lon, *, client=None):
+        calls["n"] += 1
+        await asyncio.sleep(0.02)  # hold the fetch open so both calls overlap
+        return _fake_profile()
+
+    monkeypatch.setattr(openmeteo, "fetch_profile", fake)
+
+    async def run():
+        return await asyncio.gather(
+            openmeteo.cached_fetch_profile(30.0, -90.0),
+            openmeteo.cached_fetch_profile(30.0, -90.0),
+        )
+
+    res = asyncio.run(run())
+    assert calls["n"] == 1
+    assert res[0] is res[1]
+    openmeteo.clear_profile_cache()
+
+
+def test_cached_fetch_profile_refetches_after_window_rolls(monkeypatch):
+    """A short TTL window that elapses between calls forces a refetch -- the
+    cache is time-bounded, not sticky forever."""
+    openmeteo.clear_profile_cache()
+    calls = {"n": 0}
+
+    async def fake(lat, lon, *, client=None):
+        calls["n"] += 1
+        return _fake_profile()
+
+    monkeypatch.setattr(openmeteo, "fetch_profile", fake)
+
+    async def run():
+        await openmeteo.cached_fetch_profile(45.0, -100.0, ttl_s=0.05)
+        await asyncio.sleep(0.06)
+        await openmeteo.cached_fetch_profile(45.0, -100.0, ttl_s=0.05)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+    openmeteo.clear_profile_cache()

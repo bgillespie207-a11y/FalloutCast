@@ -172,6 +172,80 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
     )
 
 
+# --- profile cache -----------------------------------------------------------
+# `fetch_profile` above stays pure (always hits the network). This is an opt-in
+# cached wrapper for callers that fetch the same points repeatedly -- notably
+# the exchange envelope, which re-fetches every target/bucket on every request.
+#
+# Keying: the cache key folds in a wall-clock time window (default 1 h) so an
+# entry naturally expires roughly on the model's refresh cadence. This is a
+# pragmatic stand-in for keying to the actual GFS run id (which the endpoint
+# doesn't cleanly expose): fetch_profile reads the *current-hour* forecast, so
+# a 1 h window matches what actually changes between reads. GFS refreshes
+# ~4x/day and HRRR hourly, so nothing served is more than ~1 h stale.
+#
+# In-flight de-duplication means concurrent requests for the same key share a
+# single network call (no thundering herd) rather than all missing at once.
+# Single-process, in-memory only -- fine for a single-node dev/personal deploy;
+# a multi-worker deployment would want a shared cache (Redis, etc.).
+import asyncio as _asyncio
+import time as _time
+
+_PROFILE_TTL_S = 3600.0
+_PROFILE_CACHE: dict[tuple, WindProfile] = {}
+_PROFILE_INFLIGHT: dict[tuple, "_asyncio.Future[WindProfile]"] = {}
+
+
+def _profile_key(lat: float, lon: float, ttl_s: float) -> tuple:
+    # round to ~0.1 deg (bucket reps are ~1 deg apart, so this never collides
+    # distinct buckets) and bucket the clock into ttl-wide windows.
+    return (round(lat, 1), round(lon, 1), int(_time.time() // ttl_s))
+
+
+def clear_profile_cache() -> None:
+    """Drop all cached profiles (test hook / manual invalidation)."""
+    _PROFILE_CACHE.clear()
+    _PROFILE_INFLIGHT.clear()
+
+
+async def cached_fetch_profile(
+    lat: float, lon: float, *, ttl_s: float = _PROFILE_TTL_S, client=None
+) -> WindProfile:
+    """`fetch_profile` with a single-process TTL cache + in-flight de-dup.
+
+    Repeat calls for the same point within the same time window return the
+    cached profile with no network call; concurrent misses for the same key
+    await one shared fetch.
+    """
+    key = _profile_key(lat, lon, ttl_s)
+    cached = _PROFILE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    inflight = _PROFILE_INFLIGHT.get(key)
+    if inflight is not None:
+        return await inflight
+
+    loop = _asyncio.get_event_loop()
+    fut: "_asyncio.Future[WindProfile]" = loop.create_future()
+    _PROFILE_INFLIGHT[key] = fut
+    try:
+        profile = await fetch_profile(lat, lon, client=client)
+    except Exception as exc:
+        fut.set_exception(exc)
+        _PROFILE_INFLIGHT.pop(key, None)
+        raise
+    # prune entries from older time windows so the dict can't grow unbounded
+    # over a long-running process.
+    current_window = key[2]
+    for k in [k for k in _PROFILE_CACHE if k[2] != current_window]:
+        _PROFILE_CACHE.pop(k, None)
+    _PROFILE_CACHE[key] = profile
+    _PROFILE_INFLIGHT.pop(key, None)
+    fut.set_result(profile)
+    return profile
+
+
 async def fetch_ensemble_profiles(
     lat: float, lon: float, *, n_members: int = ENSEMBLE_MEMBERS_AVAILABLE, client=None
 ) -> list[WindProfile]:

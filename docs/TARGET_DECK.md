@@ -122,14 +122,21 @@ in yield while still sharing one network call. `?per_class=false` restores a
 single uniform yield. The frontend hides the global yield input in exchange mode
 and shows the per-class summary instead.
 
+## Wind caching (done)
+
+`openmeteo.cached_fetch_profile` wraps `fetch_profile` (which stays pure) with a
+single-process TTL cache keyed on `(rounded point, met window)`, plus in-flight
+de-duplication so concurrent misses share one network call. The envelope's
+bucket fetch uses it, so repeat/concurrent calls reuse per-bucket profiles
+instead of re-hitting Open-Meteo. Measured: **cold ~5.8 s → warm ~0.76 s**
+(~8×; the warm call is just the grid math). The 1 h window matches what
+`fetch_profile` actually reads (the current-hour forecast) and bounds staleness;
+GFS refreshes ~4×/day, HRRR hourly. In-memory/single-node — a multi-worker
+deploy would want a shared cache (Redis).
+
 ## Still worth improving (ranked)
 
-1. **No caching.** Every envelope call re-fetches all wind buckets and
-   recomputes the grid. Bucketed fetch made it *fast enough*, but PRD.md's
-   "cache on `(bucket, met_run)`" is still the right next step — GFS refreshes
-   ~4×/day, so keying to the run (not wall-clock) would make repeat/concurrent
-   calls near-instant. This is the single highest-leverage follow-up.
-2. **Silo coordinates are synthetic** (see honesty note). If a real product is
+1. **Silo coordinates are synthetic** (see honesty note). If a real product is
    wanted, swap in a sourced LF coordinate set and drop the seeding.
 4. **Bucket wind is a shared approximation.** One profile per ~1° cell is fine
    for the transport-scale wind of a dense field, but coastal HVTs sharing a
