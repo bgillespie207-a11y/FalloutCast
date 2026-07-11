@@ -16,10 +16,13 @@ POST /exchange/envelope    true national max-envelope dose surface (PRD.md M2):
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .. import contour, grid, targets as targets_mod
+from .. import contour, grid, targetdeck, targets as targets_mod
 from ..physics import decay, ensemble
 from ..physics import tier1
 from ..physics.wseg10 import WSEG10, cloud_top_height_m
@@ -113,8 +116,17 @@ def health() -> dict:
 
 
 @app.get("/targets", response_model=list[Target])
-def get_targets() -> list[Target]:
-    return targets_mod.load_targets()
+def get_targets(expanded: bool = False) -> list[Target]:
+    """Public target set.
+
+    `expanded=false` (default): the 10 curated installations (unchanged).
+    `expanded=true`: the full national deck used by the exchange envelope --
+    the three Minuteman fields resolved to their individual launch facilities
+    and control centers (illustrative distribution within the documented field
+    footprints; see targetdeck.py) plus curated public high-value targets
+    (population centers, industry, government C2).
+    """
+    return targetdeck.load_expanded_targets() if expanded else targets_mod.load_targets()
 
 
 @app.post("/dose", response_model=DoseResponse)
@@ -309,9 +321,82 @@ async def exchange(yield_mt: float = 0.3, fission_fraction: float = 0.5) -> dict
     return {"disclaimer": DISCLAIMER, "yield_mt": yield_mt, "targets": results}
 
 
+# Wind-fetch scaling for large decks. Fetching one live wind per target is fine
+# at 10 targets but fatal at ~500 (serial: minutes + rate-limiting). Adjacent
+# targets share the same synoptic-scale transport wind, so we bucket targets
+# into ~1-degree cells and fetch ONE profile per bucket, concurrently. A whole
+# Minuteman field (~1-2 deg across) collapses from 165 fetches to a handful.
+_WIND_BUCKET_DEG = 1.0
+# Politeness cap on simultaneous Open-Meteo requests (keyless API). ~8 in flight
+# keeps a big deck fast (a few waves) without tripping rate limits.
+_WIND_FETCH_CONCURRENCY = 8
+
+
+async def _build_models_bucketed(
+    tgts: list[Target], yield_mt: float, fission_fraction: float
+) -> tuple[list[tuple[WSEG10, float, float]], list[str]]:
+    """Build one WSEG-10 model per target, sharing a single fetched wind across
+    all targets in the same ~1-degree bucket. Returns (models, failed_names).
+
+    A bucket whose (single, shared) wind fetch fails excludes every target in
+    it from the envelope rather than failing the whole request; those names are
+    returned so the response can report them. Fetches run concurrently under a
+    small semaphore.
+    """
+    cloud_top_m = cloud_top_height_m(yield_mt)
+
+    buckets: dict[tuple[int, int], list[Target]] = defaultdict(list)
+    for t in tgts:
+        buckets[(round(t.lat / _WIND_BUCKET_DEG), round(t.lon / _WIND_BUCKET_DEG))].append(t)
+
+    keys = list(buckets.keys())
+    sem = asyncio.Semaphore(_WIND_FETCH_CONCURRENCY)
+
+    async def fetch_for_bucket(members: list[Target]):
+        # representative point = centroid of the bucket's targets
+        rlat = sum(m.lat for m in members) / len(members)
+        rlon = sum(m.lon for m in members) / len(members)
+        # One retry with brief backoff: a burst of concurrent requests draws
+        # occasional transient rate-limit/timeout errors from the keyless
+        # Open-Meteo endpoint even though the same point succeeds in isolation.
+        # A single retry recovers those without slowing the happy path.
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                async with sem:
+                    profile = await openmeteo.fetch_profile(rlat, rlon)
+                return openmeteo.reduce_profile(profile, cloud_top_m)
+            except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.75)
+        raise last_exc  # type: ignore[misc]
+
+    results = await asyncio.gather(
+        *(fetch_for_bucket(buckets[k]) for k in keys), return_exceptions=True
+    )
+
+    models: list[tuple[WSEG10, float, float]] = []
+    failed: list[str] = []
+    for k, res in zip(keys, results):
+        members = buckets[k]
+        if isinstance(res, Exception):
+            failed.extend(m.name for m in members)
+            continue
+        eff = res
+        for t in members:
+            model = WSEG10(
+                yield_mt=yield_mt, fission_fraction=fission_fraction,
+                wind_mph=eff.speed_mph, wind_dir_deg=eff.bearing_deg,
+                shear_mph_per_kft=eff.shear_mph_per_kft,
+            )
+            models.append((model, t.lat, t.lon))
+    return models, failed
+
+
 @app.post("/exchange/envelope", response_model=ExchangeEnvelopeResponse)
 async def exchange_envelope(
-    yield_mt: float = 0.3, fission_fraction: float = 0.5
+    yield_mt: float = 0.3, fission_fraction: float = 0.5, expanded: bool = True
 ) -> ExchangeEnvelopeResponse:
     """True national max-envelope dose surface (PRD.md M2).
 
@@ -322,41 +407,44 @@ async def exchange_envelope(
     point from ANY of these targets," which an overlay of separate contour
     sets cannot directly show without a human eyeballing overlaps.
 
-    Each target still gets its own live wind (same per-target fetch as
-    `/exchange`); a target whose wind fetch fails is silently excluded from
-    the envelope (rather than failing the whole request) and named in notes.
-    """
-    tgts = targets_mod.load_targets()
-    models: list[tuple[WSEG10, float, float]] = []
-    failed: list[str] = []
-    for t in tgts:
-        req = PlumeRequest(
-            lat=t.lat, lon=t.lon, yield_mt=yield_mt, fission_fraction=fission_fraction
-        )
-        try:
-            wind = await _resolve_wind(req)
-        except Exception:
-            failed.append(t.name)
-            continue
-        model = WSEG10(
-            yield_mt=yield_mt, fission_fraction=fission_fraction,
-            wind_mph=wind.speed_mph, wind_dir_deg=wind.bearing_deg,
-            shear_mph_per_kft=wind.shear_mph_per_kft,
-        )
-        models.append((model, t.lat, t.lon))
+    `expanded=true` (default) uses the full national deck: the three Minuteman
+    fields resolved to their individual launch facilities/control centers plus
+    curated high-value targets (see targetdeck.py) -- ~500+ ground zeros.
+    `expanded=false` keeps the original 10-installation set.
 
+    Winds are fetched per ~1-degree bucket, concurrently, and shared across
+    targets in a bucket (see `_build_models_bucketed`); a bucket whose wind
+    fetch fails excludes its targets (not fatal) and they're named in notes.
+    For the large deck each target's dose is evaluated only within a local
+    window of its ground zero (`radius_deg`), which is what makes ~500 targets
+    tractable in one grid pass.
+    """
+    tgts = targetdeck.load_expanded_targets() if expanded else targets_mod.load_targets()
+
+    models, failed = await _build_models_bucketed(tgts, yield_mt, fission_fraction)
     if not models:
         raise HTTPException(status_code=502, detail="wind fetch failed for all targets")
 
-    g = grid.sample_envelope(models)
+    # Full grid for the small set (exact, cheap); local-window path for the big
+    # deck (bounded cost per target).
+    radius = 8.0 if expanded else None
+    g = grid.sample_envelope(models, radius_deg=radius)
     gj = contour.to_geojson_lonlat(g)
 
     notes = [
-        f"Max H+1 dose rate at each point from any of {len(models)} targets, "
+        f"Max H+1 dose rate at each point from any of {len(models)} ground zeros, "
         "on one shared CONUS grid -- not a per-target overlay.",
     ]
+    if expanded:
+        notes.append(
+            "Deck includes the three Minuteman fields resolved to individual "
+            "launch facilities/control centers (illustrative distribution within "
+            "the documented field footprints, not surveyed silo coordinates) plus "
+            "curated public high-value targets."
+        )
     if failed:
-        notes.append(f"Excluded {len(failed)} target(s) with failed wind fetch: {', '.join(failed)}.")
+        shown = ", ".join(failed[:5]) + (f", +{len(failed) - 5} more" if len(failed) > 5 else "")
+        notes.append(f"Excluded {len(failed)} target(s) with failed wind fetch: {shown}.")
 
     return ExchangeEnvelopeResponse(
         yield_mt=yield_mt, fission_fraction=fission_fraction, n_targets=len(models),

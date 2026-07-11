@@ -1,6 +1,6 @@
 import maplibregl from "maplibre-gl";
 import { MapboxOverlay } from "@deck.gl/mapbox";
-import { GeoJsonLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 
 import {
   fetchPlume,
@@ -8,8 +8,10 @@ import {
   fetchTargets,
   geocodeZip,
   ApiError,
+  type ManualWind,
   type PlumeResponse,
   type GeoJsonFeatureCollection,
+  type Target,
 } from "./api";
 import { fetchLevelSet, levelsForTime, TIME_MIN_HOURS, TIME_MAX_HOURS } from "./decay";
 
@@ -28,6 +30,34 @@ const LEVEL_COLORS: Record<number, [number, number, number, number]> = {
   1000: [136, 14, 14, 230],
 };
 
+// Ground-zero dot color per target category, for the full-exchange scatter
+// layer. Counterforce (silos/LCC/military) in cool blues/greys, countervalue
+// (population/industry/command) in warmer tones so the two kinds of target read
+// apart at a glance. RGBA, deck.gl convention.
+const TARGET_COLORS: Record<string, [number, number, number, number]> = {
+  icbm_lf: [40, 90, 170, 200],       // launch facility (silo)
+  icbm_lcc: [10, 40, 110, 230],      // launch control center
+  bomber_base: [90, 60, 160, 220],
+  ssbn_base: [0, 130, 150, 220],
+  storage: [120, 120, 130, 220],
+  command: [200, 40, 40, 235],       // government / C2
+  city_population: [235, 130, 40, 220],
+  industry: [180, 160, 40, 220],
+};
+const TARGET_COLOR_DEFAULT: [number, number, number, number] = [120, 120, 120, 200];
+
+// Human-readable labels for the target-category legend.
+const TARGET_LABELS: Record<string, string> = {
+  icbm_lf: "ICBM silo (LF)",
+  icbm_lcc: "Launch control center",
+  bomber_base: "Bomber base",
+  ssbn_base: "SSBN base",
+  storage: "Weapons storage",
+  command: "Government / C2",
+  city_population: "Population center",
+  industry: "Industry / economic",
+};
+
 const form = document.getElementById("plume-form") as HTMLFormElement;
 const latInput = document.getElementById("lat") as HTMLInputElement;
 const lonInput = document.getElementById("lon") as HTMLInputElement;
@@ -37,6 +67,11 @@ const exchangeModeCheckbox = document.getElementById("exchange-mode") as HTMLInp
 const singleTargetFields = document.getElementById("single-target-fields") as HTMLElement;
 const yieldInput = document.getElementById("yield_mt") as HTMLInputElement;
 const ffInput = document.getElementById("fission_fraction") as HTMLInputElement;
+const manualWindCheckbox = document.getElementById("manual-wind") as HTMLInputElement;
+const manualWindFields = document.getElementById("manual-wind-fields") as HTMLElement;
+const windSpeedInput = document.getElementById("wind_speed") as HTMLInputElement;
+const windBearingInput = document.getElementById("wind_bearing") as HTMLInputElement;
+const windShearInput = document.getElementById("wind_shear") as HTMLInputElement;
 const computeBtn = document.getElementById("compute-btn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 const timeControl = document.getElementById("time-control") as HTMLElement;
@@ -76,7 +111,39 @@ let currentPlume: PlumeResponse | null = null;
 // assuming the map has finished loading by the time the user hits Compute.
 const mapReady: Promise<void> = new Promise((resolve) => {
   map.on("load", () => {
-    overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+    overlay = new MapboxOverlay({
+      // Non-interleaved: deck.gl draws on its own canvas above the map.
+      // Hover picking for getTooltip was verified broken live in interleaved
+      // mode (pointer within 2px of a contour line, pickingRadius 8, no
+      // pick); thin lines sitting above basemap labels is an acceptable
+      // trade for working tooltips.
+      interleaved: false,
+      layers: [],
+      // Contours are thin (3px) lines; without a picking radius the hover
+      // target is nearly impossible to hit.
+      pickingRadius: 8,
+      getTooltip: ({ object }) => {
+        if (!object) return null;
+        // Target scatter dots are plain Target objects (name/category), not
+        // GeoJSON features -- surface which target the dot is.
+        const t = object as { name?: string; category?: string };
+        if (t.name != null && t.category != null) {
+          const label = TARGET_LABELS[t.category] ?? t.category;
+          return { text: `${t.name} -- ${label}` };
+        }
+        const p = (object as { properties?: Record<string, number> }).properties;
+        if (!p) return null;
+        // Single-plume features carry display_level_rhr (decay-relabeled by
+        // the slider); envelope features only have the raw H+1 level.
+        if (p.display_level_rhr != null) {
+          return { text: `${p.display_level_rhr} R/hr isodose at ${timeLabel.textContent}` };
+        }
+        if (p.dose_rate_h1_rhr != null) {
+          return { text: `${p.dose_rate_h1_rhr} R/hr isodose at H+1` };
+        }
+        return null;
+      },
+    });
     map.addControl(overlay as unknown as maplibregl.IControl);
     resolve();
   });
@@ -108,6 +175,40 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   await computePlume();
 });
+
+// --- manual wind override -----------------------------------------------------
+
+manualWindCheckbox.addEventListener("change", () => {
+  manualWindFields.hidden = !manualWindCheckbox.checked;
+});
+
+/** Returns the manual wind to send, or null if the override is off.
+ * Throws ApiError on out-of-range values (mirrors the API's own bounds in
+ * schemas.py so the user gets a readable message instead of a 422). */
+function manualWindFromForm(): ManualWind | null {
+  if (!manualWindCheckbox.checked) return null;
+  const speed = Number(windSpeedInput.value);
+  const bearing = Number(windBearingInput.value);
+  const shear = Number(windShearInput.value);
+  if (!Number.isFinite(speed) || speed <= 0) {
+    throw new ApiError("Manual wind speed must be a positive number of mph.");
+  }
+  if (!Number.isFinite(bearing) || bearing < 0 || bearing >= 360) {
+    throw new ApiError("Manual wind bearing must be 0-359.9 degrees.");
+  }
+  if (!Number.isFinite(shear) || shear < 0) {
+    throw new ApiError("Manual wind shear must be zero or positive.");
+  }
+  return { speed_mph: speed, bearing_deg: bearing, shear_mph_per_kft: shear };
+}
+
+// --- yield presets --------------------------------------------------------------
+
+for (const btn of document.querySelectorAll<HTMLButtonElement>(".preset")) {
+  btn.addEventListener("click", () => {
+    yieldInput.value = btn.dataset.yield ?? yieldInput.value;
+  });
+}
 
 // --- ZIP code lookup ---------------------------------------------------------
 
@@ -181,8 +282,11 @@ async function computePlume(): Promise<void> {
 
 async function computeSinglePlume(): Promise<void> {
   computeBtn.disabled = true;
-  statusEl.textContent = "Computing (fetches live wind)...";
+  statusEl.textContent = manualWindCheckbox.checked
+    ? "Computing (manual wind)..."
+    : "Computing (fetches live wind)...";
   statusEl.classList.remove("error");
+  statusEl.classList.add("busy");
   timeControl.hidden = true;
   exportBtn.hidden = true;
 
@@ -190,6 +294,7 @@ async function computeSinglePlume(): Promise<void> {
   const tier = tierInput ? (Number(tierInput.value) as 0 | 1) : 0;
 
   try {
+    const wind = manualWindFromForm();
     await ensureMapReady();
     const resp = await fetchPlume({
       lat: Number(latInput.value),
@@ -197,8 +302,10 @@ async function computeSinglePlume(): Promise<void> {
       yield_mt: Number(yieldInput.value),
       fission_fraction: Number(ffInput.value),
       tier,
+      ...(wind ? { wind } : {}),
       levels_rhr: fetchLevelSet(),
     });
+    writeUrlState({ mode: "plume", tier });
     currentPlume = resp;
     disclaimerEl.textContent = resp.disclaimer;
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
@@ -215,6 +322,7 @@ async function computeSinglePlume(): Promise<void> {
     statusEl.textContent = `Failed: ${msg}`;
     statusEl.classList.add("error");
   } finally {
+    statusEl.classList.remove("busy");
     computeBtn.disabled = false;
   }
 }
@@ -223,6 +331,7 @@ async function computeExchangeEnvelope(): Promise<void> {
   computeBtn.disabled = true;
   statusEl.textContent = "Computing national max-envelope (fetches live wind for all targets)...";
   statusEl.classList.remove("error");
+  statusEl.classList.add("busy");
   timeControl.hidden = true; // envelope has no dense level set -- no decay slider
   exportBtn.hidden = true;
   clearGzMarker();
@@ -238,6 +347,7 @@ async function computeExchangeEnvelope(): Promise<void> {
     await plotTargetMarkers();
     map.flyTo({ center: [-98.5, 39.8], zoom: 3.3 });
 
+    writeUrlState({ mode: "exchange" });
     statusEl.textContent = `Envelope computed across ${resp.n_targets} target(s).`;
     renderPlainNotes(resp.notes);
     renderStaticContours(resp.contours);
@@ -248,9 +358,57 @@ async function computeExchangeEnvelope(): Promise<void> {
     statusEl.textContent = `Failed: ${msg}`;
     statusEl.classList.add("error");
   } finally {
+    statusEl.classList.remove("busy");
     computeBtn.disabled = false;
   }
 }
+
+// --- shareable URL state ------------------------------------------------------
+// The scenario a user just computed is encoded into the query string
+// (replaceState -- no history spam), so the URL can be copied to share or
+// bookmark it. On load, matching params prefill the form but do NOT
+// auto-compute: computing fetches live wind, and firing a network-dependent
+// request nobody asked for on every page load would be rude to Open-Meteo
+// and confusing on a dead connection.
+
+function writeUrlState(opts: { mode: "plume" | "exchange"; tier?: 0 | 1 }): void {
+  const params = new URLSearchParams();
+  params.set("mode", opts.mode);
+  params.set("yield_mt", yieldInput.value);
+  params.set("ff", ffInput.value);
+  if (opts.mode === "plume") {
+    params.set("lat", latInput.value);
+    params.set("lon", lonInput.value);
+    params.set("tier", String(opts.tier ?? 0));
+  }
+  history.replaceState(null, "", `?${params}`);
+}
+
+function readUrlState(): void {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("mode")) return;
+  const setIfFinite = (input: HTMLInputElement, key: string) => {
+    const v = Number(params.get(key));
+    if (params.has(key) && Number.isFinite(v)) input.value = params.get(key)!;
+  };
+  setIfFinite(yieldInput, "yield_mt");
+  setIfFinite(ffInput, "ff");
+  if (params.get("mode") === "exchange") {
+    exchangeModeCheckbox.checked = true;
+    // Reuse the change handler to hide single-target fields etc.
+    exchangeModeCheckbox.dispatchEvent(new Event("change"));
+    return;
+  }
+  setIfFinite(latInput, "lat");
+  setIfFinite(lonInput, "lon");
+  const tier = params.get("tier");
+  if (tier === "0" || tier === "1") {
+    const radio = form.querySelector<HTMLInputElement>(`input[name="tier"][value="${tier}"]`);
+    if (radio) radio.checked = true;
+  }
+}
+
+readUrlState();
 
 function describeWind(resp: PlumeResponse): string {
   const w = resp.wind;
@@ -296,46 +454,62 @@ function clearGzMarker(): void {
   }
 }
 
-// --- full nuclear exchange: target markers + static contours -----------------
+// --- full nuclear exchange: target scatter layer + static contours -----------
+// The expanded deck is ~500+ ground zeros (three Minuteman fields resolved to
+// individual silos/LCCs, plus HVTs). One MapLibre DOM Marker per target would
+// be hundreds of DOM nodes; a single deck.gl ScatterplotLayer draws them all in
+// one GPU pass and stays responsive. It's kept in a module var so the contour
+// setProps calls can re-include it instead of clobbering it.
+let targetLayer: ScatterplotLayer | null = null;
 
-let targetMarkers: maplibregl.Marker[] = [];
+// deck.gl replaces ALL layers on each setProps, so every setProps in exchange
+// mode must re-include the target scatter beneath the contour lines.
+function setOverlayLayers(...layers: (GeoJsonLayer | ScatterplotLayer | null)[]): void {
+  overlay.setProps({ layers: layers.filter((l): l is NonNullable<typeof l> => l !== null) });
+}
 
 async function plotTargetMarkers(): Promise<void> {
-  clearTargetMarkers();
-  const targets = await fetchTargets();
-  for (const t of targets) {
-    const marker = new maplibregl.Marker({ color: "#7a1f1f", scale: 0.7 })
-      .setLngLat([t.lon, t.lat])
-      .setPopup(new maplibregl.Popup().setText(`${t.name} (${t.category})`))
-      .addTo(map);
-    targetMarkers.push(marker);
-  }
+  const targets = await fetchTargets(true);
+  targetLayer = new ScatterplotLayer<Target>({
+    id: "targets",
+    data: targets,
+    getPosition: (t) => [t.lon, t.lat],
+    // Silos are tiny and dense; keep dots small in pixels so a whole field
+    // reads as a cluster of points rather than a blob.
+    getRadius: (t) => (t.category === "icbm_lf" ? 2.5 : 4),
+    radiusUnits: "pixels",
+    radiusMinPixels: 2,
+    getFillColor: (t) => TARGET_COLORS[t.category] ?? TARGET_COLOR_DEFAULT,
+    stroked: true,
+    getLineColor: [255, 255, 255, 180],
+    lineWidthUnits: "pixels",
+    getLineWidth: 0.5,
+    pickable: true,
+  });
 }
 
 function clearTargetMarkers(): void {
-  for (const marker of targetMarkers) marker.remove();
-  targetMarkers = [];
+  targetLayer = null;
 }
 
 // Exchange-envelope contours have no per-target ground zero or decay-time
 // slider to drive (see the comment on the exchange-mode toggle above) --
-// just render the fixed H+1 dose-rate levels the API returns.
+// just render the fixed H+1 dose-rate levels the API returns, above the target
+// scatter layer.
 function renderStaticContours(fc: GeoJsonFeatureCollection): void {
-  overlay.setProps({
-    layers: [
-      new GeoJsonLayer({
-        id: "contours",
-        data: fc as unknown as GeoJSON.FeatureCollection,
-        stroked: true,
-        filled: false,
-        getLineColor: (f: any) => LEVEL_COLORS[f.properties.dose_rate_h1_rhr] ?? [255, 255, 255, 200],
-        getLineWidth: 3,
-        lineWidthUnits: "pixels",
-        pickable: true,
-      }),
-    ],
+  const contourLayer = new GeoJsonLayer({
+    id: "contours",
+    data: fc as unknown as GeoJSON.FeatureCollection,
+    stroked: true,
+    filled: false,
+    getLineColor: (f: any) => LEVEL_COLORS[f.properties.dose_rate_h1_rhr] ?? [255, 255, 255, 200],
+    getLineWidth: 3,
+    lineWidthUnits: "pixels",
+    pickable: true,
   });
+  setOverlayLayers(targetLayer, contourLayer);
   renderLegend(fc.features.map((f) => f.properties.dose_rate_h1_rhr).sort((a, b) => a - b));
+  renderTargetLegend();
 }
 
 // --- decay-time slider ------------------------------------------------------
@@ -398,6 +572,12 @@ function availableLevels(fc: GeoJsonFeatureCollection): number[] {
 
 function renderLegend(levels: number[]): void {
   legendEl.innerHTML = "";
+  if (levels.length > 0) {
+    const title = document.createElement("div");
+    title.className = "legend-title";
+    title.textContent = "Dose-rate isodose lines (hover a contour for its value)";
+    legendEl.appendChild(title);
+  }
   for (const level of levels) {
     const row = document.createElement("div");
     row.className = "legend-row";
@@ -409,6 +589,29 @@ function renderLegend(levels: number[]): void {
     const label = document.createElement("span");
     label.textContent = `${level} R/hr`;
     row.appendChild(label);
+    legendEl.appendChild(row);
+  }
+}
+
+// Category key/legend for the full-exchange target dots, appended below the
+// dose-rate isodose legend.
+function renderTargetLegend(): void {
+  const title = document.createElement("div");
+  title.className = "legend-title";
+  title.textContent = "Targets (ground zeros)";
+  legendEl.appendChild(title);
+  for (const [cat, label] of Object.entries(TARGET_LABELS)) {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    const [r, g, b] = TARGET_COLORS[cat] ?? TARGET_COLOR_DEFAULT;
+    swatch.style.background = `rgb(${r},${g},${b})`;
+    swatch.style.borderRadius = "50%";
+    row.appendChild(swatch);
+    const text = document.createElement("span");
+    text.textContent = label;
+    row.appendChild(text);
     legendEl.appendChild(row);
   }
 }

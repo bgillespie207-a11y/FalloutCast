@@ -53,6 +53,18 @@ contouring that single field — a true national max-envelope surface, not an
 overlay. Each target still gets its own live wind; a target whose wind fetch
 fails is excluded (not fatal to the request) and named in the response notes.
 
+**M2.5 (done):** expanded target deck (`targetdeck.py`, `?expanded=true`, now
+the envelope default). The three Minuteman fields are resolved to their
+individual launch facilities/control centers (150 LF + 15 LCC per wing, real
+structure; positions are an illustrative distribution within the documented
+field footprint, **not** surveyed coordinates — see `docs/TARGET_DECK.md`),
+plus curated public high-value targets (population, industry, government C2):
+~537 ground zeros total. Scaling that needed two fixes: wind is fetched **once
+per ~1° bucket, concurrently** (not once per target) and each target's dose is
+composited only within a **local window** of its ground zero
+(`grid.sample_envelope(radius_deg=...)`). Full deck with live wind runs end to
+end in ~5–6 s. Still no caching (see M2 note above / TARGET_DECK.md §1).
+
 ## 5. Modeling tiers
 
 | Tier | Engine | Weather use | Status |

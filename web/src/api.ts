@@ -93,8 +93,9 @@ export function fetchPlume(req: PlumeRequest): Promise<PlumeResponse> {
   return postJson<PlumeResponse>("/plume", req);
 }
 
-export function fetchTargets(): Promise<Target[]> {
-  return fetch(`${__API_URL__}/targets`).then((resp) => {
+export function fetchTargets(expanded = false): Promise<Target[]> {
+  const q = expanded ? "?expanded=true" : "";
+  return fetch(`${__API_URL__}/targets${q}`).then((resp) => {
     if (!resp.ok) throw new ApiError(`/targets -> HTTP ${resp.status}`);
     return resp.json() as Promise<Target[]>;
   });

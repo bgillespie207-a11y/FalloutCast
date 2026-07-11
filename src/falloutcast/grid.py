@@ -80,6 +80,7 @@ def sample_envelope(
     lon_bounds: tuple[float, float] = (CONUS_LON_MIN, CONUS_LON_MAX),
     lat_bounds: tuple[float, float] = (CONUS_LAT_MIN, CONUS_LAT_MAX),
     resolution_deg: float = 0.1,
+    radius_deg: float | None = None,
 ) -> DoseGridLonLat:
     """Composite max-envelope dose-rate grid across multiple ground zeros.
 
@@ -101,18 +102,46 @@ def sample_envelope(
     function at every grid cell. 0.1 deg (~7 mi) is a reasonable default for
     ~10 CONUS-scale targets; there is no caching yet (PRD.md's "aggressive
     per-met-run caching" is a documented future step, not implemented here).
+
+    `radius_deg` is a scaling optimization for large decks (e.g. the ~500-point
+    expanded target deck in `targetdeck.py`): instead of evaluating every
+    target against the entire CONUS grid, evaluate each target only within a
+    +/-`radius_deg` lon/lat window around its own ground zero, and MAX just
+    that sub-block into the envelope. Cells outside every target's window stay
+    zero -- which is correct as long as `radius_deg` comfortably exceeds the
+    plume reach (WSEG-10 dose decays to ~0 within a few hundred miles; ~8 deg
+    ~= 550 mi is safe for sub-megaton bursts). `None` (default) keeps the exact
+    original full-grid behavior, so existing results/tests are unchanged.
     """
     n_lon = int((lon_bounds[1] - lon_bounds[0]) / resolution_deg) + 1
     n_lat = int((lat_bounds[1] - lat_bounds[0]) / resolution_deg) + 1
     lon_axis = np.linspace(lon_bounds[0], lon_bounds[1], n_lon)
     lat_axis = np.linspace(lat_bounds[0], lat_bounds[1], n_lat)
-    glon, glat = np.meshgrid(lon_axis, lat_axis)
 
-    envelope = np.zeros_like(glon)
+    envelope = np.zeros((n_lat, n_lon), dtype=float)
+
+    if radius_deg is None:
+        glon, glat = np.meshgrid(lon_axis, lat_axis)
+        for model, gz_lat, gz_lon in models:
+            y_mi = (glat - gz_lat) * _MILES_PER_DEG_LAT
+            x_mi = (glon - gz_lon) * _MILES_PER_DEG_LAT * np.cos(np.radians(gz_lat))
+            dose = model.dose_rate_h1(x_mi, y_mi)
+            np.maximum(envelope, dose, out=envelope)
+        return DoseGridLonLat(lon_deg=lon_axis, lat_deg=lat_axis, dose_rate_h1=envelope)
+
+    # Local-window path: only touch the sub-grid within radius_deg of each GZ.
     for model, gz_lat, gz_lon in models:
-        y_mi = (glat - gz_lat) * _MILES_PER_DEG_LAT
-        x_mi = (glon - gz_lon) * _MILES_PER_DEG_LAT * np.cos(np.radians(gz_lat))
+        i0 = int(np.searchsorted(lon_axis, gz_lon - radius_deg, side="left"))
+        i1 = int(np.searchsorted(lon_axis, gz_lon + radius_deg, side="right"))
+        j0 = int(np.searchsorted(lat_axis, gz_lat - radius_deg, side="left"))
+        j1 = int(np.searchsorted(lat_axis, gz_lat + radius_deg, side="right"))
+        if i0 >= i1 or j0 >= j1:
+            continue  # target's window falls entirely outside the grid
+        sub_lon, sub_lat = np.meshgrid(lon_axis[i0:i1], lat_axis[j0:j1])
+        y_mi = (sub_lat - gz_lat) * _MILES_PER_DEG_LAT
+        x_mi = (sub_lon - gz_lon) * _MILES_PER_DEG_LAT * np.cos(np.radians(gz_lat))
         dose = model.dose_rate_h1(x_mi, y_mi)
-        np.maximum(envelope, dose, out=envelope)
+        block = envelope[j0:j1, i0:i1]
+        np.maximum(block, dose, out=block)
 
     return DoseGridLonLat(lon_deg=lon_axis, lat_deg=lat_axis, dose_rate_h1=envelope)

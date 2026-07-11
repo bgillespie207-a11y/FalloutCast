@@ -7,7 +7,25 @@
       "Bash(git init *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "WebSearch",
+      "Bash(curl -s \"https://ensemble-api.open-meteo.com/v1/ensemble?latitude=41.14&longitude=-104.82&hourly=windspeed_700hPa,winddirection_700hPa,geopotential_height_700hPa&models=gfs025&wind_speed_unit=ms&forecast_days=1\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"https://ensemble-api.open-meteo.com/v1/ensemble?latitude=41.14&longitude=-104.82&hourly=windspeed_1000hPa,winddirection_1000hPa,geopotential_height_1000hPa,windspeed_925hPa,windspeed_850hPa,windspeed_700hPa,windspeed_500hPa,windspeed_300hPa,windspeed_250hPa&models=gfs025&wind_speed_unit=ms&forecast_days=1\" -o /tmp/ens.json -w \"%{http_code}\\\\n\")",
+      "Bash(python3 -c ' *)",
+      "WebFetch(domain:pmc.ncbi.nlm.nih.gov)",
+      "WebFetch(domain:scholar.afit.edu)",
+      "Bash(curl -sIL -A \"Mozilla/5.0 \\(Macintosh; Intel Mac OS X 10_15_7\\) AppleWebKit/537.36\" \"https://scholar.afit.edu/cgi/viewcontent.cgi?article=2468&context=etd\")",
+      "WebFetch(domain:archive.org)",
+      "WebFetch(domain:apps.dtic.mil)",
+      "Bash(curl -s \"https://ensemble-api.open-meteo.com/v1/ensemble?latitude=41.14&longitude=-104.82&hourly=windspeed_1000hPa,windspeed_925hPa,windspeed_850hPa,windspeed_700hPa,windspeed_500hPa,windspeed_300hPa,windspeed_250hPa&models=gfs025&wind_speed_unit=ms&forecast_days=1\")",
+      "Bash(curl -s \"https://ensemble-api.open-meteo.com/v1/ensemble?latitude=41.14&longitude=-104.82&hourly=windspeed_700hPa&wind_speed_unit=ms&forecast_days=1\")",
+      "Bash(curl -s \"https://ensemble-api.open-meteo.com/v1/ensemble?latitude=41.14&longitude=-104.82&hourly=windspeed_700hPa&models=gfs_seamless&wind_speed_unit=ms&forecast_days=1\" -o /tmp/e2.json -w \"%{http_code}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s \"https://ensemble-api.open-meteo.com/v1/ensemble?latitude=41.14&longitude=-104.82&hourly=windspeed_700hPa&models=gfs_seamless&wind_speed_unit=ms&forecast_days=1\")",
+      "WebFetch(domain:nuke.fas.org)",
+      "Bash(curl -s \"https://archive-api.open-meteo.com/v1/archive?latitude=37.0396&longitude=-116.0790&start_date=1962-07-14&end_date=1962-07-14&hourly=windspeed_700hPa,winddirection_700hPa,geopotential_height_700hPa,windspeed_500hPa,winddirection_500hPa\" -o /tmp/hist.json -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(python3 -m json.tool /tmp/hist.json)"
     ]
   }
 }

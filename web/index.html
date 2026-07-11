@@ -61,12 +61,50 @@
               >
             </fieldset>
             <p class="hint">Click the map to set ground zero, type coordinates, or look up a ZIP code.</p>
+            <fieldset>
+              <legend>Wind</legend>
+              <label class="checkbox-row">
+                <input type="checkbox" id="manual-wind" />
+                Manual override (skips the live wind fetch)
+              </label>
+              <!-- No `required` here: these stay in the DOM while hidden, and a
+              hidden required input blocks form submission with no visible
+              cue. Range/NaN checks happen in JS only when the override is
+              actually enabled. -->
+              <div id="manual-wind-fields" hidden>
+                <label
+                  >Speed (mph)
+                  <input type="number" id="wind_speed" step="any" min="0.1" value="15" />
+                </label>
+                <label
+                  >Bearing (deg, direction plume travels toward)
+                  <input type="number" id="wind_bearing" step="any" min="0" max="359.9" value="90" />
+                </label>
+                <label
+                  >Shear (mph per kft)
+                  <input type="number" id="wind_shear" step="any" min="0" value="0" />
+                </label>
+                <p class="hint">
+                  Tier 1 needs a full vertical wind profile; with a manual wind
+                  the API computes Tier 0 instead and says so in the notes.
+                </p>
+              </div>
+            </fieldset>
           </div>
 
           <label
             >Yield (Mt)
             <input type="number" id="yield_mt" step="any" min="0.001" value="0.3" required />
           </label>
+          <!-- Input shortcuts only, not claimed weapon data: round numbers
+          spanning the tactical-to-strategic range. -->
+          <div class="preset-row" role="group" aria-label="Yield presets">
+            <button type="button" class="preset" data-yield="0.01">10 kt</button>
+            <button type="button" class="preset" data-yield="0.1">100 kt</button>
+            <button type="button" class="preset" data-yield="0.3">300 kt</button>
+            <button type="button" class="preset" data-yield="1">1 Mt</button>
+            <button type="button" class="preset" data-yield="5">5 Mt</button>
+          </div>
           <label
             >Fission fraction
             <input
