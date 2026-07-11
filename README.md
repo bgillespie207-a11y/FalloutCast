@@ -25,8 +25,9 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
 - [x] **Dose calibrated to Glasstone & Dolan (9,000 R/hr·km²/kt); size
       distribution grounded in DELFIC (σ_ln ≈ ln 2)**
 - [x] **Ensemble uncertainty band: P(dose ≥ level) across wind members**
-- [x] FastAPI: `/plume` (tier 0/1), `/ensemble`, `/dose`, `/exchange`, `/targets`, `/health`
-- [x] 62-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
+- [x] FastAPI: `/plume` (tier 0/1), `/ensemble`, `/dose`, `/exchange`,
+      `/exchange/envelope`, `/targets`, `/health`
+- [x] 67-test suite (physics structural + magnitude + curvature + ensemble + fractionation)
 - [x] DELFIC-style fractionation rule for activity-vs-size (refractory/volume
       vs volatile/surface split, opt-in). `F_VOLATILE_PLACEHOLDER` (0.5,
       illustrative) remains the default; `f_volatile_from_yields()` is a
@@ -46,14 +47,16 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
       (goes negative) — a real, documented model limitation, not run
       through Tier-1. Still not a full contour for either case, see
       TIER1_SPEC.md §9.7
-- [ ] Exchange mode: true national max-envelope dose surface
+- [x] Exchange mode: true national max-envelope dose surface
+      (`POST /exchange/envelope`) — one composite CONUS grid, cell-wise max
+      across all targets; no result caching yet (recomputes live every call)
 - [ ] Web map frontend (MapLibre + deck.gl)
 
 ## Quickstart
 
 ```bash
 pip install -e ".[dev]"
-pytest                      # 18 passing
+pytest                      # 67 passing
 uvicorn falloutcast.api.main:app --reload
 ```
 
@@ -81,6 +84,14 @@ curl -s localhost:8000/plume -H 'content-type: application/json' -d '{
 The response carries `tier_requested`/`tier_used` and, for Tier-1,
 `fraction_aloft` — the share of activity carried past the local footprint to
 regional/global scale.
+
+National max-envelope across the full public target set (one composite
+CONUS grid, not a per-target overlay — see `/exchange` for the overlay
+instead):
+
+```bash
+curl -s -X POST 'localhost:8000/exchange/envelope?yield_mt=0.3&fission_fraction=0.5'
+```
 
 ## Architecture
 

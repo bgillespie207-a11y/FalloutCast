@@ -42,10 +42,16 @@ and a disclaimer.
 
 ### 4.2 Exchange (multi-target)
 Overlay fallout from the public CONUS target set under current winds. **v1
-semantics:** each target is modeled independently with its own local wind and
-the contour sets are returned together. This is an overlay, not a summed
-national dose surface — stated plainly so it is not mistaken for more than it
-is. The true national max-envelope grid is milestone M2.
+semantics** (`POST /exchange`, unchanged): each target is modeled
+independently with its own local wind and the contour sets are returned
+together. This is an overlay, not a summed national dose surface — stated
+plainly so it is not mistaken for more than it is.
+
+**M2 (done):** `POST /exchange/envelope` composites all targets onto one
+shared CONUS grid and takes the cell-wise max H+1 dose rate across targets,
+contouring that single field — a true national max-envelope surface, not an
+overlay. Each target still gets its own live wind; a target whose wind fetch
+fails is excluded (not fatal to the request) and named in the response notes.
 
 ## 5. Modeling tiers
 
@@ -103,6 +109,10 @@ behind the same API rather than blocking launch.
 - `POST /plume` — single-detonation contours. Body: lat, lon, yield_mt,
   fission_fraction, surface_burst, optional wind override, optional levels.
 - `POST /exchange` — target overlay (yield_mt, fission_fraction query params).
+- `POST /exchange/envelope` — true national max-envelope dose surface, same
+  query params, one composite GeoJSON contour set instead of N per-target ones.
+- `POST /dose`, `POST /ensemble` — time-evolution and wind-ensemble endpoints
+  (M1/M1.5, not listed above when this section was first written).
 
 ## 10. Roadmap / milestones
 
@@ -153,8 +163,15 @@ behind the same API rather than blocking launch.
   limitation (not a bug) documented directly in the test suite rather than
   worked around. Neither case is a full digitized contour or a tight
   validation. See TIER1_SPEC.md §9.7 for exactly what's missing.
-- **M2:** Exchange national max-envelope dose surface (shared CONUS grid,
-  precompute-per-target-then-composite, aggressive per-met-run caching).
+- **M2 (done):** Exchange national max-envelope dose surface —
+  `POST /exchange/envelope` composites all targets onto one shared CONUS
+  grid (`grid.sample_envelope`) and contours the cell-wise max
+  (`contour.to_geojson_lonlat`). **Not done:** the "aggressive per-met-run
+  caching" this milestone originally scoped — v1 recomputes the full CONUS
+  grid (10 targets x ~130k cells at the 0.1°/~7mi default resolution) on
+  every request, live-fetching each target's wind fresh; fine at the
+  current 10-target scale (~6s end to end) but would need real caching to
+  scale further or serve concurrent users cheaply.
 - **M3:** Optional HYSPLIT Tier-2 backend behind the same `/plume` contract.
 - **M4:** MapLibre + deck.gl frontend; decay time slider; GeoJSON/export.
 
