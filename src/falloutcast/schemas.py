@@ -95,6 +95,19 @@ class EnsembleResponse(BaseModel):
     contours: dict  # probability bands: P(dose rate >= level_rhr)
 
 
+class ExchangeEnvelopeResponse(BaseModel):
+    """True national max-envelope dose surface (PRD.md M2) -- one composite
+    grid/contour set across all targets, not a per-target overlay (contrast
+    the plain dict `/exchange` returns)."""
+
+    yield_mt: float
+    fission_fraction: float
+    n_targets: int
+    disclaimer: str
+    notes: list[str] = []
+    contours: dict  # one FeatureCollection: max H+1 dose rate from ANY target
+
+
 DISCLAIMER = (
     "Planning estimate only, not an operational product. Uses the WSEG-10 "
     "analytic fallout model driven by a single effective wind; it assumes a "

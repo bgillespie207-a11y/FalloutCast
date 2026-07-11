@@ -2,12 +2,16 @@
 
 Endpoints
 ---------
-GET  /health           liveness
-GET  /targets          public CONUS strategic-site set
-POST /plume            single-detonation fallout contours
-POST /exchange         multi-target overlay (v1: per-target plumes composited
-                       as overlaid contours; a true national max-envelope grid
-                       is a roadmap item -- see docs/PRD.md)
+GET  /health              liveness
+GET  /targets             public CONUS strategic-site set
+POST /plume               single-detonation fallout contours
+POST /dose                time-evolution of exposure at a point
+POST /ensemble             wind-ensemble dose-exceedance probability bands
+POST /exchange             multi-target overlay (N separate per-target plumes)
+POST /exchange/envelope    true national max-envelope dose surface (PRD.md M2):
+                           one composite CONUS grid, cell-wise max across all
+                           targets, contoured once -- not an overlay of N
+                           separate contour sets.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from ..schemas import (
     DoseSample,
     EnsembleRequest,
     EnsembleResponse,
+    ExchangeEnvelopeResponse,
     PlumeRequest,
     PlumeResponse,
     Target,
@@ -289,3 +294,58 @@ async def exchange(yield_mt: float = 0.3, fission_fraction: float = 0.5) -> dict
             }
         )
     return {"disclaimer": DISCLAIMER, "yield_mt": yield_mt, "targets": results}
+
+
+@app.post("/exchange/envelope", response_model=ExchangeEnvelopeResponse)
+async def exchange_envelope(
+    yield_mt: float = 0.3, fission_fraction: float = 0.5
+) -> ExchangeEnvelopeResponse:
+    """True national max-envelope dose surface (PRD.md M2).
+
+    Unlike `/exchange` (a per-target overlay -- N separate plumes returned
+    side by side), this composites all targets onto ONE shared CONUS grid and
+    takes the cell-wise MAX H+1 dose rate across targets, then contours that
+    single composite field. It answers "what's the worst dose rate at this
+    point from ANY of these targets," which an overlay of separate contour
+    sets cannot directly show without a human eyeballing overlaps.
+
+    Each target still gets its own live wind (same per-target fetch as
+    `/exchange`); a target whose wind fetch fails is silently excluded from
+    the envelope (rather than failing the whole request) and named in notes.
+    """
+    tgts = targets_mod.load_targets()
+    models: list[tuple[WSEG10, float, float]] = []
+    failed: list[str] = []
+    for t in tgts:
+        req = PlumeRequest(
+            lat=t.lat, lon=t.lon, yield_mt=yield_mt, fission_fraction=fission_fraction
+        )
+        try:
+            wind = await _resolve_wind(req)
+        except Exception:
+            failed.append(t.name)
+            continue
+        model = WSEG10(
+            yield_mt=yield_mt, fission_fraction=fission_fraction,
+            wind_mph=wind.speed_mph, wind_dir_deg=wind.bearing_deg,
+            shear_mph_per_kft=wind.shear_mph_per_kft,
+        )
+        models.append((model, t.lat, t.lon))
+
+    if not models:
+        raise HTTPException(status_code=502, detail="wind fetch failed for all targets")
+
+    g = grid.sample_envelope(models)
+    gj = contour.to_geojson_lonlat(g)
+
+    notes = [
+        f"Max H+1 dose rate at each point from any of {len(models)} targets, "
+        "on one shared CONUS grid -- not a per-target overlay.",
+    ]
+    if failed:
+        notes.append(f"Excluded {len(failed)} target(s) with failed wind fetch: {', '.join(failed)}.")
+
+    return ExchangeEnvelopeResponse(
+        yield_mt=yield_mt, fission_fraction=fission_fraction, n_targets=len(models),
+        disclaimer=DISCLAIMER, notes=notes, contours=gj,
+    )
