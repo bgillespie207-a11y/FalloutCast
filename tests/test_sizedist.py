@@ -131,3 +131,57 @@ def test_fractionation_increases_aloft_fraction_and_downwind_reach():
 
     assert fractionated.fraction_aloft > pure.fraction_aloft
     assert _activity_weighted_mean_x(fractionated) > _activity_weighted_mean_x(pure)
+
+
+# --- per-nuclide alternative (f_volatile_from_yields) -----------------------
+
+def test_f_volatile_from_yields_in_unit_interval():
+    assert 0.0 < sizedist.f_volatile_from_yields() < 1.0
+
+
+def test_f_volatile_from_yields_matches_hand_computation():
+    """Regression check against the specific cited yield values -- catches a
+    silent edit to FISSION_PRODUCT_CHAINS (added/removed/reclassified chain,
+    typo'd yield) without hardcoding a numeric literal the docstring can't
+    explain; the arithmetic here is the same sum-and-divide the module
+    docstring describes."""
+    volatile_yield = 5.73 + 6.221       # Sr-90/Y-90 + Cs-137/Ba-137m
+    refractory_yield = 6.502 + 6.132    # Zr-95/Nb-95 + Mo-99/Tc-99m
+    expected = volatile_yield / (volatile_yield + refractory_yield)
+    assert sizedist.f_volatile_from_yields() == pytest.approx(expected)
+
+
+def test_fission_product_chains_are_documented_and_unique():
+    """Every chain must cite both its yield source and its classification
+    source (rule 1/2: no unsourced numbers presented as fact), and mass
+    numbers must be unique -- this table intentionally excludes several
+    candidate chains (89, 91, 97, 131, 140, 141, 143, 144) for insufficient
+    sourcing rather than guessing; a duplicate or unlabeled entry would mean
+    that discipline slipped."""
+    chains = sizedist.FISSION_PRODUCT_CHAINS
+    assert len(chains) >= 2  # need at least one of each class to be useful
+    mass_numbers = [c.mass_number for c in chains]
+    assert len(mass_numbers) == len(set(mass_numbers))
+    for c in chains:
+        assert len(c.yield_citation) > 20, f"mass {c.mass_number} yield_citation looks unpopulated"
+        assert len(c.classification_citation) > 20, f"mass {c.mass_number} classification_citation looks unpopulated"
+        assert c.cumulative_yield_percent > 0
+
+
+def test_fission_product_chains_include_both_classes():
+    """The set must have at least one refractory and one volatile chain, or
+    f_volatile_from_yields() would silently degenerate to 0.0 or 1.0."""
+    chains = sizedist.FISSION_PRODUCT_CHAINS
+    assert any(c.is_volatile for c in chains)
+    assert any(not c.is_volatile for c in chains)
+
+
+def test_f_volatile_from_yields_usable_as_fractionation_param():
+    """Integration: the sourced alternative plugs into the same
+    FractionationParams interface as the placeholder, unchanged."""
+    bins = sizedist.lognormal_bins(
+        fractionation=sizedist.FractionationParams(
+            f_volatile=sizedist.f_volatile_from_yields()
+        )
+    )
+    assert bins.activity_share.sum() == pytest.approx(1.0)

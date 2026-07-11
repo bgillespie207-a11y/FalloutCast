@@ -125,6 +125,150 @@ SIGMA_LN_DEFAULT = 0.7           # ~ ln 2, DELFIC/Nathans log-slope
 F_VOLATILE_PLACEHOLDER = 0.5
 
 
+# --- scoped per-nuclide alternative (2026-07) --------------------------------
+#
+# A follow-up research pass tried to replace F_VOLATILE_PLACEHOLDER outright
+# by implementing DELFIC's real per-nuclide logic (fission yield x
+# refractory/volatile classification per mass chain, per FRATIO -- see above).
+# Full fidelity was NOT achieved: DELFIC's actual model needs oxide boiling
+# points and a fireball condensation time-history for ~40+ mass chains, and a
+# true DOSE-RATE weighting (not just fission yield) per chain. Assembling
+# that reliably -- without silently mistranscribing a number from a garbled
+# OCR scan or an under-verified web table, which this project's rules treat
+# as equivalent to inventing one -- was not achievable in this pass. Several
+# candidate chains (masses 89, 91, 97, 131, 140, 141, 143, 144) were tried
+# and DROPPED: either their yield value could not be cross-verified with
+# confidence (mass-131's read anomalously low against its neighbors and
+# wasn't independently confirmable), or their refractory/volatile
+# classification had no explicit citation found (mass-140, Ba/La, is
+# genuinely described as intermediate/disputed in places, not cleanly one or
+# the other) rather than force a guess.
+#
+# What COULD be assembled with real confidence: a small (4-chain) but
+# genuinely sourced, per-nuclide, yield-weighted computation, for the mass
+# chains where BOTH an explicit refractory/volatile classification AND a
+# cross-verified cumulative fission yield were found. This is a real
+# structural upgrade over the symmetry-only 0.5 default -- but it is still
+# yield-weighted (a proxy for activity abundance), not dose-rate-weighted
+# (what actually matters for H+1 gamma dose rate), and covers only 4 of the
+# ~40+ fission-product mass chains DELFIC's real FRATIO tracks. Treat
+# `f_volatile_from_yields()` as a better-grounded alternative to the
+# placeholder, not as "the sourced DELFIC number" -- it isn't.
+@dataclass(frozen=True)
+class FissionProductChain:
+    """One fission-product mass chain used in `f_volatile_from_yields`.
+
+    `is_volatile` reflects the chain's EMPIRICALLY-OBSERVED fractionation
+    behavior (per `classification_citation`), not a boiling-point lookup on
+    the chain's own end-nuclide -- several chains (e.g. mass-89, Sr-89)
+    behave volatile because of a short-lived noble-gas/alkali-metal
+    PRECURSOR (Kr, Rb) present at soil-solidification time, even though the
+    stable end-member element (Sr) is itself chemically refractory. Citing
+    the literature's own classification sidesteps having to get that
+    precursor-chain physics right from scratch.
+    """
+
+    mass_number: int
+    label: str                       # dominant nuclide(s) at H+1-ish timescale
+    cumulative_yield_percent: float  # U-235 thermal fission
+    is_volatile: bool
+    yield_citation: str
+    classification_citation: str
+
+
+FISSION_PRODUCT_CHAINS: tuple[FissionProductChain, ...] = (
+    FissionProductChain(
+        mass_number=95, label="Zr-95/Nb-95", cumulative_yield_percent=6.502,
+        is_volatile=False,
+        yield_citation=(
+            "JEFF-3.1 cumulative fission yield, U-235 thermal fission, per "
+            "Wikipedia 'Fission product yield' table (retrieved 2026-07-11); "
+            "cross-checked as '~6%' against a second, independent source "
+            "summary in the same research pass."
+        ),
+        classification_citation=(
+            "Zr-95 is Freiling's own canonical refractory reference nuclide "
+            "throughout the fractionation literature -- Freiling, E.C., "
+            "'Radionuclide Fractionation in Bomb Debris,' Science 133:1991-"
+            "1998 (1961); used as the explicit reference nuclide for Small "
+            "Boy/Johnny Boy fractionation analysis in Kawahara, Bunney, "
+            "Freiling & Crocker, 'The Effect of Radionuclide Fractionation "
+            "on the Normalization Factor for Fallout Fields' (DTIC "
+            "AD0473335, USNRDL, undated)."
+        ),
+    ),
+    FissionProductChain(
+        mass_number=99, label="Mo-99/Tc-99m", cumulative_yield_percent=6.132,
+        is_volatile=False,
+        yield_citation=(
+            "JEFF-3.1 cumulative fission yield, U-235 thermal fission, per "
+            "Wikipedia 'Fission product yield' table (retrieved 2026-07-11); "
+            "cross-checked as 6.13% against a second, independent source in "
+            "the same research pass."
+        ),
+        classification_citation=(
+            "DTIC AD0473335 (Kawahara, Bunney, Freiling & Crocker) "
+            "explicitly lists Mo-99 among 'the refractory nuclides which "
+            "did not fractionate from [Zr-95]' in its analysis of Small Boy "
+            "gross fallout samples."
+        ),
+    ),
+    FissionProductChain(
+        mass_number=90, label="Sr-90/Y-90", cumulative_yield_percent=5.73,
+        is_volatile=True,
+        yield_citation=(
+            "JEFF-3.1 cumulative fission yield, U-235 thermal fission, per "
+            "Wikipedia 'Fission product yield' table (retrieved 2026-07-11)."
+        ),
+        classification_citation=(
+            "Pernick, A., 'On Fractionation and the Particle Activity Model "
+            "of DELFIC' (IAEA INIS 15046199): lists mass chains 89, 90, 131, "
+            "137 as DELFIC's own volatile-chain examples. Physical basis "
+            "per DTIC AD0473335: mass-89's (and by the same chemistry, "
+            "mass-90's) volatility 'is characteristic of the precursor "
+            "bromine, krypton, and rubidium... and not of the strontium' "
+            "itself."
+        ),
+    ),
+    FissionProductChain(
+        mass_number=137, label="Cs-137/Ba-137m", cumulative_yield_percent=6.221,
+        is_volatile=True,
+        yield_citation=(
+            "JEFF-3.1 cumulative fission yield, U-235 thermal fission, per "
+            "Wikipedia 'Fission product yield' table (retrieved 2026-07-11); "
+            "cross-checked as 6.22% against a second, independent source in "
+            "the same research pass."
+        ),
+        classification_citation=(
+            "Pernick (IAEA INIS 15046199) lists mass-137 among DELFIC's "
+            "volatile-chain examples; DTIC AD0473335 explicitly groups "
+            "Cs-137 with Sr-89 as nuclides found 'depleted' (i.e. "
+            "fractionating/volatile) in Small Boy gross fallout samples."
+        ),
+    ),
+)
+
+
+def f_volatile_from_yields(
+    chains: tuple[FissionProductChain, ...] = FISSION_PRODUCT_CHAINS,
+) -> float:
+    """Yield-weighted volatile activity fraction over `chains`.
+
+    sum(yield of volatile chains) / sum(yield of all chains) -- treats
+    cumulative fission yield as a proxy for activity contribution. This is
+    NOT a true dose-rate-weighted average (different nuclides contribute
+    very differently per unit yield, depending on gamma energy/intensity
+    and half-life) and `chains` defaults to a small, non-exhaustive set (see
+    the "scoped per-nuclide alternative" comment above for exactly what was
+    tried and dropped). Real, sourced, computed data -- a genuine structural
+    upgrade over `F_VOLATILE_PLACEHOLDER` -- but still a partial proxy, not
+    DELFIC's actual dose-weighted, ~40-chain FRATIO calculation.
+    """
+    total = sum(c.cumulative_yield_percent for c in chains)
+    volatile = sum(c.cumulative_yield_percent for c in chains if c.is_volatile)
+    return volatile / total
+
+
 @dataclass
 class SizeBins:
     diameter_m: np.ndarray       # representative diameter per bin
@@ -141,7 +285,9 @@ class FractionationParams:
     surface-area (~d^2) branch; the remainder (1 - f_volatile) uses the
     refractory / volume (~d^3) branch. f_volatile=0.0 reproduces the pure
     lognormal `lognormal_bins` output exactly; f_volatile=1.0 is all-volatile.
-    See `F_VOLATILE_PLACEHOLDER` -- this coefficient is not yet sourced.
+    Defaults to `F_VOLATILE_PLACEHOLDER` (illustrative, not sourced) --
+    `f_volatile_from_yields()` is a more-sourced, if still partial,
+    alternative: `FractionationParams(f_volatile=f_volatile_from_yields())`.
     """
 
     f_volatile: float = F_VOLATILE_PLACEHOLDER
