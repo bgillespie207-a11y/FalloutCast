@@ -3,12 +3,13 @@
   "configurations": [
     {
       "name": "api",
-      "runtimeExecutable": "bash",
+      "runtimeExecutable": "/usr/bin/env",
       "runtimeArgs": [
-        "-c",
-        "cd /Users/brendangillespie/Downloads/falloutcast && source .venv/bin/activate && uvicorn falloutcast.api.main:app --port 8010"
+        "PYTHONPATH=/Users/brendangillespie/Downloads/falloutcast/.venv/lib/python3.12/site-packages:/Users/brendangillespie/Downloads/falloutcast/src",
+        "python3", "-m", "uvicorn", "falloutcast.api.main:app",
+        "--port", "$PORT"
       ],
-      "port": 8010
+      "autoPort": true
     },
     {
       "name": "web",
