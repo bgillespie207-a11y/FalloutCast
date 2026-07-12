@@ -112,9 +112,16 @@ DIRECTION against the real Small Boy sounding, in
       that would catch an advection-direction bug in either, independent of
       the digitized data.
 These are genuine (if partial) directional validations against real historical
-data, not just plumbing tests. Footprint MAGNITUDE remains unvalidated for the
-reasons above. The rest of the harness tests are code-correctness checks (the
-plumbing runs and returns finite, structurally-bounded output).
+data, not just plumbing tests. Footprint MAGNITUDE is not validated *here*
+(these historical cases can't, for the reasons above) -- but it IS validated
+separately in `idealized_pattern.py`, which compares WSEG-10's contour SIZE
+against the Glasstone & Dolan idealized 1-Mt surface-burst reference (a true
+HOB=0, strategic-yield, given-wind pattern that matches this model's
+assumptions, unlike any real NTS shot reachable here). That establishes the
+footprint size is right against the canonical idealized reference; what remains
+open is agreement with a specific *measured* shot's raw contour. The rest of
+the harness tests are code-correctness checks (the plumbing runs and returns
+finite, structurally-bounded output).
 """
 
 from __future__ import annotations

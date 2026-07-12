@@ -71,7 +71,18 @@ end in ~5–6 s cold.
 (`openmeteo.cached_fetch_profile`, TTL + in-flight de-dup) that cuts a warm
 envelope call to ~0.76 s (~8×); and a Tier-0/Tier-1 directional cross-check
 on the real Small Boy sounding (the two engines agree on plume bearing to
-0.6°) — footprint *magnitude* remains unvalidated. See `docs/TARGET_DECK.md`.
+0.6°). See `docs/TARGET_DECK.md`.
+
+**M2.7 (done):** footprint MAGNITUDE validation. `validation/idealized_pattern.py`
+compares WSEG-10's contour size against Glasstone & Dolan's idealized 1-Mt
+contact-surface-burst pattern (Effects of Nuclear Weapons 1977, Table 9.93) —
+the first reference that matches the model's own assumptions (HOB=0, strategic
+yield, given 15 mph effective wind, H+1 R/hr contours). WSEG-10's downwind reach
+agrees within a factor of ~2 across the 1000→1 R/hr contours (ratios ~0.8–1.5),
+with near-exact width on the high-dose contours. Scope: conformance to G&D's
+canonical idealized reference, not a fit to one specific measured shot (that
+remains open). This is the first check that footprint *size*, not just
+direction, is right.
 
 ## 5. Modeling tiers
 
@@ -214,8 +225,11 @@ behind the same API rather than blocking launch.
   with persistent disclaimers, visible wind source, and (M1) an uncertainty band
   from ensemble winds.
 - **Met resolution / terrain.** GFS/HRRR won't resolve local channeling; state it.
-- **Validation.** Tier-1 needs ground truth; check footprints against published
-  patterns and HYSPLIT runs before trusting shapes.
+- **Validation.** Tier-0 (WSEG-10) footprint *size* is now checked against the
+  Glasstone & Dolan idealized surface-burst pattern (M2.7) and its direction
+  against a real NTS sounding (M2.6). Still open: Tier-1's magnitude against
+  ground truth, and agreement with a specific *measured* shot's raw contour —
+  check against published patterns / HYSPLIT before trusting Tier-1 shapes.
 - **Positioning.** Keep the civil-defense framing explicit in-product (surface
   burst, public sites) so intent is unambiguous.
 
