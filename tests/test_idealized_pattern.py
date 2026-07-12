@@ -49,6 +49,27 @@ def test_wseg10_reproduces_gd_downwind_extent_within_factor_two():
         )
 
 
+def test_tier1_reproduces_gd_downwind_extent_within_factor_two():
+    """Magnitude validation of the TIER-1 engine (multi-layer advection), not
+    just Tier-0: under a uniform 15 mph profile at 1 Mt pure fission, Tier-1's
+    downwind reach for each fallout contour (1000..1 R/hr) lands within a factor
+    of ~2 of G&D Table 9.93.
+
+    Tier-1's absolute dose is anchored to G&D's activity normalization, so this
+    is chiefly a check that the fall-velocity binning + puff advection DISTRIBUTE
+    that activity to the right downwind distances. Bound is a hair looser than
+    the Tier-0 test (0.45-2.2) because Tier-1's output is a discretized,
+    adaptively-gridded deposition rather than a smooth analytic curve."""
+    comps = {c.level_rhr: c for c in ip.compare_tier1(yield_mt=1.0)}
+    for level in ip.VALIDATED_LEVELS:
+        c = comps[level]
+        assert c.model_downwind_mi is not None, f"Tier-1 never reached {level} R/hr"
+        assert 0.45 <= c.downwind_ratio <= 2.2, (
+            f"{level} R/hr: Tier-1 {c.model_downwind_mi:.0f} mi vs "
+            f"G&D {c.reference_downwind_mi:.0f} mi (ratio {c.downwind_ratio:.2f})"
+        )
+
+
 def test_high_dose_contour_widths_are_in_the_right_ballpark():
     """A secondary, looser check: WSEG-10's crosswind width for the tighter
     high-dose contours (1000/300 R/hr) is within a factor of ~2 of G&D. Width

@@ -140,6 +140,39 @@ def model_contour(
     )
 
 
+def _downwind_and_width(gx, gy, dose, level_rhr):
+    """(farthest-downwind, max crosswind width) of dose >= level, or None."""
+    mask = dose >= level_rhr
+    if not mask.any():
+        return None
+    downwind = float(np.where(mask, gx, -np.inf).max())
+    covered = mask.any(axis=0)
+    col_y = np.where(mask[:, covered], gy[:, covered], np.nan)
+    max_width = float((np.nanmax(col_y, axis=0) - np.nanmin(col_y, axis=0)).max())
+    return downwind, max_width
+
+
+def _tier1_field(yield_mt: float, wind_mph: float, t_max_h: float, n_bins: int, n_layers: int):
+    """Run Tier-1 under a UNIFORM wind (constant with height, blowing due east)
+    so the comparison to G&D's idealized pattern is apples-to-apples: no shear,
+    just the multi-layer fall-and-advect machinery. Returns (gx, gy, dose_h1)."""
+    # Local import: keeps this validation module's top-level deps light and
+    # avoids importing the Tier-1 engine unless a Tier-1 comparison is run.
+    from ..physics import tier1
+
+    ms = wind_mph * 0.44704
+    heights = np.array([0.0, 2000.0, 5000.0, 8000.0, 12000.0, 16000.0, 20000.0])
+    u = np.full_like(heights, ms)   # east component the wind blows TOWARD
+    v = np.zeros_like(heights)
+    res = tier1.simulate(
+        yield_mt=yield_mt, fission_fraction=1.0, heights_m=heights,
+        wind_u_ms=u, wind_v_ms=v, t_max_s=t_max_h * 3600.0,
+        n_bins=n_bins, n_layers=n_layers,
+    )
+    gx, gy = np.meshgrid(res.x_miles, res.y_miles)
+    return gx, gy, res.dose_rate_h1
+
+
 @dataclass(frozen=True)
 class LevelComparison:
     level_rhr: int
@@ -151,7 +184,7 @@ class LevelComparison:
 
 
 def compare(yield_mt: float = 1.0, *, shear_mph_per_kft: float = 0.0) -> list[LevelComparison]:
-    """WSEG-10 vs the G&D idealized reference at every Table 9.93 contour."""
+    """Tier-0 WSEG-10 vs the G&D idealized reference at every Table 9.93 contour."""
     yield_kt = yield_mt * 1000.0
     out: list[LevelComparison] = []
     for level in sorted(TABLE_9_93, reverse=True):
@@ -166,6 +199,39 @@ def compare(yield_mt: float = 1.0, *, shear_mph_per_kft: float = 0.0) -> list[Le
                 downwind_ratio=ratio,
                 reference_width_mi=ref.max_width_miles,
                 model_width_mi=mdl.max_width_miles if mdl else None,
+            )
+        )
+    return out
+
+
+def compare_tier1(
+    yield_mt: float = 1.0, *, wind_mph: float = EFFECTIVE_WIND_MPH, t_max_h: float = 48.0
+) -> list[LevelComparison]:
+    """Tier-1 (multi-layer advection) vs the G&D idealized reference.
+
+    Runs Tier-1 ONCE under a uniform `wind_mph` profile and extracts every
+    Table 9.93 contour's extent from that single field. NOTE on scope: Tier-1's
+    absolute dose is already anchored to G&D's activity normalization (see
+    tier1._DOSE_CONV), so this primarily validates the spatial DISTRIBUTION --
+    that the fall-velocity binning + puff advection place the deposited activity
+    at the right downwind distances -- rather than re-checking the magnitude
+    constant. `t_max_h=48` is long enough for even the fine bins to settle at
+    these wind speeds (verified: fraction_aloft ~ 0)."""
+    yield_kt = yield_mt * 1000.0
+    gx, gy, dose = _tier1_field(yield_mt, wind_mph, t_max_h, n_bins=15, n_layers=10)
+    out: list[LevelComparison] = []
+    for level in sorted(TABLE_9_93, reverse=True):
+        ref = reference_contour(level, yield_kt)
+        ext = _downwind_and_width(gx, gy, dose, level)
+        ratio = (ext[0] / ref.downwind_miles) if ext else None
+        out.append(
+            LevelComparison(
+                level_rhr=level,
+                reference_downwind_mi=ref.downwind_miles,
+                model_downwind_mi=ext[0] if ext else None,
+                downwind_ratio=ratio,
+                reference_width_mi=ref.max_width_miles,
+                model_width_mi=ext[1] if ext else None,
             )
         )
     return out

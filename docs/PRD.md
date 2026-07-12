@@ -91,8 +91,16 @@ footprint (Glasstone & Dolan §9.104–9.109). The model's 700-rad/96-h lethal b
 lands within a factor of ~2 of the measured ~170 × 35 mi; overall extent is the
 same order. A coarse but genuine tie to ground truth — heavily caveated (coral
 surface vs continental-soil calibration, a measured pattern G&D calls
-"guesswork", single derived wind). Open: a *precision* measured-contour match
-and Tier-1 magnitude.
+"guesswork", single derived wind).
+
+**M2.9 (done):** Tier-1 magnitude validation. `idealized_pattern.compare_tier1`
+runs the multi-layer engine under a uniform 15 mph profile and compares its
+contour extents to the same G&D Table 9.93 reference; Tier-1's downwind reach
+also lands within a factor of ~2 (ratios ~0.56–1.65). Tier-1's dose is already
+anchored to G&D's activity normalization, so this chiefly validates that its
+fall-velocity binning + puff advection distribute activity to the right
+distances. Open now: only a *precision* (sub-factor-2) match to a measured
+contour.
 
 ## 5. Modeling tiers
 

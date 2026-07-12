@@ -41,6 +41,21 @@ def main() -> None:
           "downwind because WSEG-10's crosswind growth is SPEED-shear driven, a "
           "different parameterization than G&D's 15-degree directional shear.")
     print()
+
+    print("--- Tier-1 (multi-layer advection) vs the same G&D reference ---")
+    print(f"{'R/hr':>6} | {'G&D down':>9} {'T1 down':>9} {'ratio':>6}")
+    print("-" * 36)
+    for c in ip.compare_tier1(yield_mt=yield_mt):
+        excluded = "" if c.level_rhr in ip.VALIDATED_LEVELS else "  (excluded)"
+        md = f"{c.model_downwind_mi:9.1f}" if c.model_downwind_mi is not None else f"{'--':>9}"
+        rt = f"{c.downwind_ratio:6.2f}" if c.downwind_ratio is not None else f"{'--':>6}"
+        print(f"{c.level_rhr:>6} | {c.reference_downwind_mi:9.1f} {md} {rt}{excluded}")
+    print()
+    print("Tier-1 also lands within ~a factor of 2 downwind. Its dose magnitude "
+          "is anchored to G&D's activity normalization, so this mainly validates "
+          "that its fall-velocity binning + puff advection DISTRIBUTE activity to "
+          "the right distances (vs Tier-0's analytic smear).")
+    print()
     print("Scope: conformance to G&D's canonical idealized surface-burst "
           "reference (itself calibrated to test data), NOT a fit to one specific "
           "measured shot. It is the first check that WSEG-10's footprint SIZE "
