@@ -168,6 +168,46 @@ def test_model_bearing_lands_in_same_quadrant_as_digitized_points():
     assert lo <= result.hotline_bearing_deg <= hi
 
 
+def _circular_diff_deg(a: float, b: float) -> float:
+    """Smallest absolute angular difference between two compass bearings."""
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def test_tier0_and_tier1_agree_on_plume_direction_for_small_boy():
+    """Cross-engine directional validation on the real Small Boy wind.
+
+    Tier-0 (WSEG-10, analytic) and Tier-1 (multi-layer advection) are two
+    independent engines. Driven by the SAME real digitized sounding, their
+    plume directions should agree: Tier-0's dose peaks at GZ so its plume axis
+    is the layer-mean effective-wind bearing, while Tier-1's is its advected
+    peak-dose cell. They landing within a tight band of each other -- AND both
+    within the generous digitized-points band -- is a genuine consistency
+    check that would catch an advection-direction bug in either engine.
+
+    Scope (honest): this validates plume DIRECTION only. Footprint magnitude
+    stays unvalidated -- the burst-height mismatch and unknown fission
+    fraction (module docstring gaps) preclude a dose-magnitude claim, and the
+    wind is a single H+5min snapshot, not a multi-day reconstruction."""
+    eff = ref.small_boy_effective_wind()
+    tier0_axis = eff.bearing_deg  # Tier-0 plume axis == mean-wind bearing
+
+    heights_m, u, v = ref.small_boy_wind_h5min()
+    result = ref.run_case(
+        ref.SMALL_BOY_1962, heights_m=heights_m, wind_u_ms=u, wind_v_ms=v,
+        fission_fraction=1.0, t_max_s=48 * 3600.0,
+    )
+    assert result.hotline_bearing_deg is not None
+
+    # the two engines agree on direction to within a tight tolerance
+    assert _circular_diff_deg(tier0_axis, result.hotline_bearing_deg) < 15.0
+
+    # and both sit within the (generous) band of the hand-digitized bearings
+    digitized = [p.bearing_deg for p in ref.SMALL_BOY_DIGITIZED_POINTS]
+    lo, hi = min(digitized) - 45.0, max(digitized) + 45.0
+    assert lo <= tier0_axis <= hi
+    assert lo <= result.hotline_bearing_deg <= hi
+
+
 def test_little_feller_ii_wind_hhour_shape_and_units():
     """Digitized DNA 1251-1-EX Table 107 sounding (single H-hour column,
     unlike Small Boy's three-column table): same length across all three

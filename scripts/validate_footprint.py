@@ -57,9 +57,20 @@ def main() -> None:
         fission_fraction=1.0,  # unboosted-fission assumption, see case note
         t_max_s=48 * 3600.0,
     )
-    print(f"MODEL: hotline bearing {result.hotline_bearing_deg:.1f} deg, "
+    print(f"MODEL (Tier-1): hotline bearing {result.hotline_bearing_deg:.1f} deg, "
           f"downwind reach {result.downwind_reach_miles:.1f} mi (48h grid extent), "
           f"fraction aloft {result.fraction_aloft:.3f}")
+
+    # Tier-0/Tier-1 cross-check: the analytic engine's plume axis is the
+    # layer-mean effective-wind bearing (its dose peaks at GZ), driven by the
+    # same real sounding. Two independent engines agreeing on direction is a
+    # real consistency check (see the harness test of the same name).
+    eff = ref.small_boy_effective_wind()
+    cross = abs((eff.bearing_deg - result.hotline_bearing_deg + 180.0) % 360.0 - 180.0)
+    print(f"MODEL (Tier-0): plume axis {eff.bearing_deg:.1f} deg "
+          f"(layer-mean effective wind {eff.speed_mph:.1f} mph) -- "
+          f"agrees with Tier-1 to {cross:.1f} deg. Two independent engines on "
+          "the same real wind; a DIRECTION cross-check, not a magnitude one.")
     print()
     print("DIGITIZED TARGET POINTS (hand-traced from the source's own scanned "
           "contour figures -- see each note for confidence caveats):")

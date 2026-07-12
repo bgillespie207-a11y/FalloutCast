@@ -96,13 +96,25 @@ five research passes -- see git history on this file for the trail):
    both real soundings came from the primary test report instead.
 
 Given gaps 1 and 2 remain, `run_case` is still a tool for manual/structural
-comparison, not something wired into pytest's assert-based tests -- there is
-still no sourced numeric contour to assert equality/tolerance against, and
-the burst-height mismatch (gap 1) means even a perfect wind and a digitized
-target contour wouldn't make this an apples-to-apples validation. See
-`tests/test_footprint_validation_harness.py` for what IS tested: the harness
-plumbing runs and returns sane, finite, structurally-bounded output (a
-code-correctness check, not a physics validation).
+comparison, not something wired into a sourced-contour equality assertion --
+there is still no sourced numeric contour to assert magnitude against, and the
+burst-height mismatch (gap 1) means even a perfect wind and a digitized target
+contour wouldn't make this an apples-to-apples *magnitude* validation.
+
+What IS validated (directionally): two things now cross-check the plume
+DIRECTION against the real Small Boy sounding, in
+`tests/test_footprint_validation_harness.py` --
+  (a) Tier-1's advected hotline bearing lands in the same band as the
+      independently hand-traced digitized points (a data cross-check), and
+  (b) Tier-0 (analytic; plume axis = layer-mean effective-wind bearing, via
+      `small_boy_effective_wind()`) and Tier-1 (multi-layer advection) agree
+      on that direction to within a tight tolerance -- a cross-ENGINE check
+      that would catch an advection-direction bug in either, independent of
+      the digitized data.
+These are genuine (if partial) directional validations against real historical
+data, not just plumbing tests. Footprint MAGNITUDE remains unvalidated for the
+reasons above. The rest of the harness tests are code-correctness checks (the
+plumbing runs and returns finite, structurally-bounded output).
 """
 
 from __future__ import annotations
@@ -347,6 +359,35 @@ def small_boy_wind_h5min() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     u = -speed_ms * np.sin(rad)
     v = -speed_ms * np.cos(rad)
     return heights_m, u, v
+
+
+def small_boy_effective_wind():
+    """Small Boy's real sounding reduced to ONE Tier-0 effective wind (the
+    layer-mean over the stabilized-cloud depth, via the same
+    `weather.openmeteo.reduce_profile` the live API uses).
+
+    Purpose: a Tier-0/Tier-1 cross-check. Tier-0's analytic dose peaks AT ground
+    zero, so its plume axis is definitionally this effective (mean) wind
+    bearing; comparing it to Tier-1's advected peak-dose bearing on the SAME
+    real wind checks that the two independent engines agree on plume direction
+    (see `tests/test_footprint_validation_harness.py`). Small Boy's 1.7 kt yield
+    gives a positive WSEG-10 cloud height (unlike Little Feller II's 22 tons),
+    so Tier-0 is runnable here. This validates DIRECTION only -- not footprint
+    magnitude, which the burst-height/fission-fraction gaps still preclude.
+    """
+    # Local imports: keep this validation module's top-level dependencies light
+    # (numpy + physics.tier1); the weather reduction is only needed for this
+    # one Tier-0 cross-check helper.
+    from ..physics.wseg10 import cloud_top_height_m
+    from ..weather import openmeteo
+
+    profile = openmeteo.WindProfile(
+        height_m=SMALL_BOY_WIND_H5MIN_FT_MSL * _FT_TO_M,
+        speed_ms=SMALL_BOY_WIND_H5MIN_SPEED_MPH * _MPH_TO_MS,
+        direction_deg=SMALL_BOY_WIND_H5MIN_DIR_FROM_DEG,
+    )
+    cloud_top_m = cloud_top_height_m(SMALL_BOY_1962.yield_kt / 1000.0)
+    return openmeteo.reduce_profile(profile, cloud_top_m)
 
 
 # --- second case: Little Feller II (1962-07-07) -----------------------------
