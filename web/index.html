@@ -90,6 +90,31 @@
                 </p>
               </div>
             </fieldset>
+
+            <fieldset>
+              <legend>Uncertainty band</legend>
+              <label class="checkbox-row">
+                <input type="checkbox" id="ensemble-mode" />
+                Ensemble band (real GFS ensemble winds)
+              </label>
+              <div id="ensemble-fields" hidden>
+                <label
+                  >Dose level to band (R/hr)
+                  <input type="number" id="ensemble-level" step="any" min="0.001" value="1" />
+                </label>
+                <label
+                  >Ensemble members (3–40)
+                  <input type="number" id="ensemble-members" step="1" min="3" max="40" value="12" />
+                </label>
+                <p class="hint">
+                  Runs Tier&nbsp;1 across live GFS-ensemble wind members and maps the
+                  probability that the H+1 dose rate exceeds this level. The outer
+                  band is where fallout <em>could</em> reach; the inner is where it
+                  very likely will. Uses real ensemble winds (not tier/manual wind);
+                  slower than a single plume.
+                </p>
+              </div>
+            </fieldset>
           </div>
 
           <!-- Global yield/fission apply to the single-plume view. In full-

@@ -68,6 +68,26 @@ export interface ExchangeEnvelopeResponse {
   contours: GeoJsonFeatureCollection;
 }
 
+export interface EnsembleRequest {
+  lat: number;
+  lon: number;
+  yield_mt: number;
+  fission_fraction: number;
+  level_rhr: number;
+  n_members: number;
+}
+
+export interface EnsembleResponse {
+  ground_zero: [number, number];
+  level_rhr: number;
+  n_members: number;
+  mean_fraction_aloft: number;
+  disclaimer: string;
+  notes: string[];
+  // contour features carry { exceedance_probability: 0.1 | 0.5 | 0.9 }
+  contours: GeoJsonFeatureCollection;
+}
+
 export interface ZipLocation {
   lat: number;
   lon: number;
@@ -91,6 +111,10 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
 export function fetchPlume(req: PlumeRequest): Promise<PlumeResponse> {
   return postJson<PlumeResponse>("/plume", req);
+}
+
+export function fetchEnsemble(req: EnsembleRequest): Promise<EnsembleResponse> {
+  return postJson<EnsembleResponse>("/ensemble", req);
 }
 
 export function fetchTargets(expanded = false): Promise<Target[]> {

@@ -5,6 +5,7 @@ import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import {
   fetchPlume,
   fetchExchangeEnvelope,
+  fetchEnsemble,
   fetchTargets,
   geocodeZip,
   ApiError,
@@ -46,6 +47,21 @@ const TARGET_COLORS: Record<string, [number, number, number, number]> = {
 };
 const TARGET_COLOR_DEFAULT: [number, number, number, number] = [120, 120, 120, 200];
 
+// Ensemble exceedance-probability bands. A cool sequential ramp, deliberately
+// distinct from the warm dose-rate palette above so the two views never read as
+// the same thing: the outer 10% band ("could reach") is faint, the inner 90%
+// ("very likely") is saturated. RGBA, deck.gl convention.
+const PROB_COLORS: Record<number, [number, number, number, number]> = {
+  0.1: [140, 190, 225, 200],
+  0.5: [60, 120, 200, 220],
+  0.9: [30, 40, 130, 240],
+};
+const PROB_LABELS: Record<number, string> = {
+  0.1: "10% — outer edge (could reach)",
+  0.5: "50% — more likely than not",
+  0.9: "90% — very likely",
+};
+
 // Human-readable labels for the target-category legend.
 const TARGET_LABELS: Record<string, string> = {
   icbm_lf: "ICBM silo (LF)",
@@ -74,6 +90,10 @@ const manualWindFields = document.getElementById("manual-wind-fields") as HTMLEl
 const windSpeedInput = document.getElementById("wind_speed") as HTMLInputElement;
 const windBearingInput = document.getElementById("wind_bearing") as HTMLInputElement;
 const windShearInput = document.getElementById("wind_shear") as HTMLInputElement;
+const ensembleModeCheckbox = document.getElementById("ensemble-mode") as HTMLInputElement;
+const ensembleFields = document.getElementById("ensemble-fields") as HTMLElement;
+const ensembleLevelInput = document.getElementById("ensemble-level") as HTMLInputElement;
+const ensembleMembersInput = document.getElementById("ensemble-members") as HTMLInputElement;
 const computeBtn = document.getElementById("compute-btn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 const timeControl = document.getElementById("time-control") as HTMLElement;
@@ -141,6 +161,10 @@ const mapReady: Promise<void> = new Promise((resolve) => {
         }
         const p = (object as { properties?: Record<string, number> }).properties;
         if (!p) return null;
+        // Ensemble bands carry an exceedance probability, not a dose level.
+        if (p.exceedance_probability != null) {
+          return { text: `${(p.exceedance_probability * 100).toFixed(0)}% chance dose rate ≥ this level` };
+        }
         // Single-plume features carry display_level_rhr (decay-relabeled by
         // the slider); envelope features only have the raw H+1 level.
         if (p.display_level_rhr != null) {
@@ -188,6 +212,31 @@ form.addEventListener("submit", async (e) => {
 
 manualWindCheckbox.addEventListener("change", () => {
   manualWindFields.hidden = !manualWindCheckbox.checked;
+});
+
+// --- ensemble uncertainty-band toggle ----------------------------------------
+// Ensemble is a single-ground-zero operation (like the plume view) but runs
+// Tier-1 across real GFS-ensemble members and maps exceedance probability. It
+// uses the ensemble winds, not the tier/manual-wind controls, so those are
+// left visible but documented as ignored (see the fieldset hint).
+
+function updateComputeButtonText(): void {
+  if (exchangeModeCheckbox.checked) {
+    computeBtn.textContent = "Compute national envelope";
+  } else if (ensembleModeCheckbox.checked) {
+    computeBtn.textContent = "Compute uncertainty band";
+  } else {
+    computeBtn.textContent = "Compute plume";
+  }
+}
+
+ensembleModeCheckbox.addEventListener("change", () => {
+  ensembleFields.hidden = !ensembleModeCheckbox.checked;
+  updateComputeButtonText();
+  // Switching mode invalidates any deterministic plume on screen (the decay
+  // slider has no meaning for a probability band), so clear that state.
+  timeControl.hidden = true;
+  currentPlume = null;
 });
 
 /** Returns the manual wind to send, or null if the override is off.
@@ -265,9 +314,7 @@ exchangeModeCheckbox.addEventListener("change", () => {
   // per-target-class yields server-side, so swap the input for a summary note.
   globalYieldFields.hidden = exchangeModeCheckbox.checked;
   perClassNote.hidden = !exchangeModeCheckbox.checked;
-  computeBtn.textContent = exchangeModeCheckbox.checked
-    ? "Compute national envelope"
-    : "Compute plume";
+  updateComputeButtonText();
   statusEl.textContent = "";
   statusEl.classList.remove("error");
   timeControl.hidden = true;
@@ -287,8 +334,59 @@ exchangeModeCheckbox.addEventListener("change", () => {
 async function computePlume(): Promise<void> {
   if (exchangeModeCheckbox.checked) {
     await computeExchangeEnvelope();
+  } else if (ensembleModeCheckbox.checked) {
+    await computeEnsembleBand();
   } else {
     await computeSinglePlume();
+  }
+}
+
+async function computeEnsembleBand(): Promise<void> {
+  computeBtn.disabled = true;
+  statusEl.textContent = "Computing ensemble band (fetches live GFS-ensemble winds, runs Tier-1 per member)...";
+  statusEl.classList.remove("error");
+  statusEl.classList.add("busy");
+  timeControl.hidden = true; // probability band has no decay slider
+  exportBtn.hidden = true;
+  currentPlume = null;
+  clearTargetMarkers();
+
+  const level = Number(ensembleLevelInput.value);
+  const members = Number(ensembleMembersInput.value);
+  if (!Number.isFinite(level) || level <= 0) {
+    statusEl.textContent = "Dose level to band must be a positive number of R/hr.";
+    statusEl.classList.remove("busy");
+    statusEl.classList.add("error");
+    computeBtn.disabled = false;
+    return;
+  }
+
+  try {
+    await ensureMapReady();
+    const resp = await fetchEnsemble({
+      lat: Number(latInput.value),
+      lon: Number(lonInput.value),
+      yield_mt: Number(yieldInput.value),
+      fission_fraction: Number(ffInput.value),
+      level_rhr: level,
+      n_members: Math.round(members),
+    });
+    disclaimerEl.textContent = resp.disclaimer;
+    placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
+    map.flyTo({ center: resp.ground_zero, zoom: 6 });
+
+    statusEl.textContent = `P(H+1 dose rate ≥ ${resp.level_rhr} R/hr) across ${resp.n_members} members.`;
+    renderPlainNotes(resp.notes);
+    renderEnsembleContours(resp.contours);
+    exportGeoJson = resp.contours;
+    exportBtn.hidden = false;
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : String(err);
+    statusEl.textContent = `Failed: ${msg}`;
+    statusEl.classList.add("error");
+  } finally {
+    statusEl.classList.remove("busy");
+    computeBtn.disabled = false;
   }
 }
 
@@ -522,6 +620,49 @@ function renderStaticContours(fc: GeoJsonFeatureCollection): void {
   setOverlayLayers(targetLayer, contourLayer);
   renderLegend(fc.features.map((f) => f.properties.dose_rate_h1_rhr).sort((a, b) => a - b));
   renderTargetLegend();
+}
+
+// --- ensemble uncertainty bands ---------------------------------------------
+// Exceedance-probability contours (10/50/90%). Rendered as nested lines from
+// the faint outer edge to the saturated core, with the inner (more-likely)
+// bands drawn thicker to reinforce the nesting.
+function renderEnsembleContours(fc: GeoJsonFeatureCollection): void {
+  const layer = new GeoJsonLayer({
+    id: "ensemble",
+    data: fc as unknown as GeoJSON.FeatureCollection,
+    stroked: true,
+    filled: false,
+    getLineColor: (f: any) => PROB_COLORS[f.properties.exceedance_probability] ?? [255, 255, 255, 200],
+    getLineWidth: (f: any) => 2 + 3 * (f.properties.exceedance_probability ?? 0.5),
+    lineWidthUnits: "pixels",
+    pickable: true,
+  });
+  setOverlayLayers(layer);
+  const probs = [...new Set(fc.features.map((f) => f.properties.exceedance_probability))].sort(
+    (a, b) => a - b,
+  );
+  renderEnsembleLegend(probs);
+}
+
+function renderEnsembleLegend(probs: number[]): void {
+  legendEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "legend-title";
+  title.textContent = "Chance H+1 dose rate exceeds the level (hover a band)";
+  legendEl.appendChild(title);
+  for (const p of probs) {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    const [r, g, b] = PROB_COLORS[p] ?? [255, 255, 255, 200];
+    swatch.style.background = `rgb(${r},${g},${b})`;
+    row.appendChild(swatch);
+    const label = document.createElement("span");
+    label.textContent = PROB_LABELS[p] ?? `${(p * 100).toFixed(0)}%`;
+    row.appendChild(label);
+    legendEl.appendChild(row);
+  }
 }
 
 // --- decay-time slider ------------------------------------------------------
