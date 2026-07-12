@@ -63,7 +63,15 @@ plus curated public high-value targets (population, industry, government C2):
 per ~1° bucket, concurrently** (not once per target) and each target's dose is
 composited only within a **local window** of its ground zero
 (`grid.sample_envelope(radius_deg=...)`). Full deck with live wind runs end to
-end in ~5–6 s. Still no caching (see M2 note above / TARGET_DECK.md §1).
+end in ~5–6 s cold.
+
+**M2.6 (done):** per-target-class yields (`targetdeck.CATEGORY_YIELD`,
+`?per_class=true`, envelope default) so footprints differ by target type
+(silos 0.30 Mt W87-class, countervalue/hardened-C2 0.50 Mt); wind caching
+(`openmeteo.cached_fetch_profile`, TTL + in-flight de-dup) that cuts a warm
+envelope call to ~0.76 s (~8×); and a Tier-0/Tier-1 directional cross-check
+on the real Small Boy sounding (the two engines agree on plume bearing to
+0.6°) — footprint *magnitude* remains unvalidated. See `docs/TARGET_DECK.md`.
 
 ## 5. Modeling tiers
 
@@ -178,12 +186,9 @@ behind the same API rather than blocking launch.
 - **M2 (done):** Exchange national max-envelope dose surface —
   `POST /exchange/envelope` composites all targets onto one shared CONUS
   grid (`grid.sample_envelope`) and contours the cell-wise max
-  (`contour.to_geojson_lonlat`). **Not done:** the "aggressive per-met-run
-  caching" this milestone originally scoped — v1 recomputes the full CONUS
-  grid (10 targets x ~130k cells at the 0.1°/~7mi default resolution) on
-  every request, live-fetching each target's wind fresh; fine at the
-  current 10-target scale (~6s end to end) but would need real caching to
-  scale further or serve concurrent users cheaply.
+  (`contour.to_geojson_lonlat`). The "aggressive per-met-run caching" this
+  milestone originally scoped is now **done** (M2.6 below):
+  `openmeteo.cached_fetch_profile` gives a ~8× speedup on repeat calls.
 - **M3:** Optional HYSPLIT Tier-2 backend behind the same `/plume` contract.
 - **M4 (done, single-plume only):** MapLibre + deck.gl frontend (`web/`) —
   click-to-set-GZ, Tier 0/1 toggle, decay time slider (client-side only, see
