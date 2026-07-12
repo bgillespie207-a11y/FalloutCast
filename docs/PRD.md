@@ -80,9 +80,19 @@ the first reference that matches the model's own assumptions (HOB=0, strategic
 yield, given 15 mph effective wind, H+1 R/hr contours). WSEG-10's downwind reach
 agrees within a factor of ~2 across the 1000→1 R/hr contours (ratios ~0.8–1.5),
 with near-exact width on the high-dose contours. Scope: conformance to G&D's
-canonical idealized reference, not a fit to one specific measured shot (that
-remains open). This is the first check that footprint *size*, not just
-direction, is right.
+canonical idealized reference, not a fit to one specific measured shot. This is
+the first check that footprint *size*, not just direction, is right.
+
+**M2.8 (done):** magnitude validation against a REAL MEASURED shot —
+`validation/castle_bravo.py` compares WSEG-10 (at Castle Bravo's sourced 15 Mt /
+~67% fission / surface, arrival-derived ~20 mph wind, H+1 field converted to
+96-h accumulated dose via the decay module) against the measured 1954 Bravo
+footprint (Glasstone & Dolan §9.104–9.109). The model's 700-rad/96-h lethal belt
+lands within a factor of ~2 of the measured ~170 × 35 mi; overall extent is the
+same order. A coarse but genuine tie to ground truth — heavily caveated (coral
+surface vs continental-soil calibration, a measured pattern G&D calls
+"guesswork", single derived wind). Open: a *precision* measured-contour match
+and Tier-1 magnitude.
 
 ## 5. Modeling tiers
 

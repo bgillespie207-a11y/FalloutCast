@@ -114,14 +114,19 @@ DIRECTION against the real Small Boy sounding, in
 These are genuine (if partial) directional validations against real historical
 data, not just plumbing tests. Footprint MAGNITUDE is not validated *here*
 (these historical cases can't, for the reasons above) -- but it IS validated
-separately in `idealized_pattern.py`, which compares WSEG-10's contour SIZE
-against the Glasstone & Dolan idealized 1-Mt surface-burst reference (a true
-HOB=0, strategic-yield, given-wind pattern that matches this model's
-assumptions, unlike any real NTS shot reachable here). That establishes the
-footprint size is right against the canonical idealized reference; what remains
-open is agreement with a specific *measured* shot's raw contour. The rest of
-the harness tests are code-correctness checks (the plumbing runs and returns
-finite, structurally-bounded output).
+separately, two ways:
+  * `idealized_pattern.py` -- WSEG-10 vs Glasstone & Dolan's idealized 1-Mt
+    surface-burst reference (a true HOB=0, strategic-yield, given-wind pattern
+    matching this model's assumptions). Establishes footprint size is right
+    against the canonical idealized reference.
+  * `castle_bravo.py` -- WSEG-10 vs the REAL MEASURED Castle Bravo (1954)
+    footprint: the model's 700-rad/96-h lethal belt lands within a factor of
+    ~2 of the measured ~170 x 35 mi. A coarse but genuine tie to ground truth,
+    heavily caveated (coral surface, a measured pattern G&D calls "guesswork").
+What remains open is a *precision* (not factor-~2) match to a measured contour,
+and Tier-1 (not just Tier-0) magnitude. The rest of the harness tests are
+code-correctness checks (the plumbing runs and returns finite, structurally-
+bounded output).
 """
 
 from __future__ import annotations
