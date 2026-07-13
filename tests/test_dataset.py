@@ -56,9 +56,9 @@ def test_synthetic_points_are_flagged_with_low_confidence_and_field_scale_accura
     for t in synth:
         assert t.geography_mode == "synthetic", t.id
         assert t.confidence == "low", t.id
-        assert t.accuracy_m >= 1000.0, t.id  # field-scale, not survey precision
-        # provenance must NOT claim precise coordinates are sourced
-        assert "coordinates are NOT" in t.source
+        assert t.accuracy_m >= 1000.0, t.id  # flight-scale, not survey precision
+        # provenance must disclaim surveyed/precise coordinates
+        assert "NOT surveyed coordinates" in t.source
 
 
 def test_verified_view_has_zero_synthetic_points():
@@ -68,6 +68,21 @@ def test_verified_view_has_zero_synthetic_points():
     assert verified  # cities/installations remain
     assert all(t.geography_mode != "synthetic" for t in verified)
     assert all(t.category not in ("icbm_lf", "icbm_lcc") for t in verified)
+
+
+def test_lccs_sit_at_the_map_anchored_flight_centers():
+    """Each flight's LCC is placed at its real documented (map-anchored)
+    location -- so the field layout follows the actual flight geography, not a
+    jittered grid. Flight letters run A..O (15 flights)."""
+    for wing in targetdeck.WINGS:
+        wing_slug = wing.name.replace(" ", "")
+        by_id = {t.id: t for t in targetdeck.generate_wing(wing) if t.category == "icbm_lcc"}
+        assert len(by_id) == 15
+        letters = {a[0] for a in wing.flights}
+        assert letters == set("ABCDEFGHIJKLMNO")
+        for letter, lat, lon in wing.flights:
+            lcc = by_id[f"{wing_slug}-{letter}-LCC"]
+            assert lcc.lat == round(lat, 4) and lcc.lon == round(lon, 4)
 
 
 def test_field_polygons_are_the_verifiable_geography():

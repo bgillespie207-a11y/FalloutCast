@@ -19,22 +19,27 @@ representative:
      control sites.
 
 ============================ HONESTY NOTE (read this) =========================
-The individual LF/LCC coordinates here are a DETERMINISTIC ILLUSTRATIVE
-DISTRIBUTION generated within each wing's documented public field footprint --
-NOT surveyed launch-facility coordinates. This project's first rule is "never
-invent a physical constant and present it as sourced" (see docs/HANDOFF.md).
-Real LF coordinates exist in public arms-control/OSINT sources, but they are
-not reproduced here to survey accuracy, and fabricating ~500 precise points
-and passing them off as real would violate that rule.
+Each flight's LCC is placed at its REAL documented location, anchored to the
+public USAF missile site maps (F.E. Warren "Missile Site Map, Space Command",
+and the equivalent public 91 MW/Minot and 341 MW/Malmstrom field maps) via the
+named town each flight sits near. Those flight LOCATIONS are real public
+geography. What remains APPROXIMATE is the position of each individual launch
+facility WITHIN its flight: the source maps are explicitly "not to scale" (and
+the Warren map is historical -- it shows the 200-missile / 20-flight era, while
+the current wing is 150 LF / 15 flights per GAO 2025), so per-silo coordinates
+cannot be digitized from them. The 10 LFs of each flight are therefore
+scattered (deterministically, seeded) around the real flight center and stay
+geography_mode="synthetic". This project's first rule -- "never invent a
+physical constant and present it as sourced" -- is why the individual points
+are flagged synthetic rather than dressed up as surveyed coordinates.
 
-For fallout-footprint modeling this is the right trade anyway: the WSEG-10
-footprint of a field is driven by the field's *extent and density*, not by
-meter-accurate silo positions. What is faithful here is the count (150 LF + 15
-LCC/wing), the organization (flights of 10), the wing's real geographic
-bounding footprint, and the rough LF spacing. What is synthetic is the exact
-placement within that footprint. The generator is seeded, so the deck is
-stable run-to-run. Swap in a sourced LF coordinate set (and drop the seeding)
-to make this a real coordinate product.
+For fallout-footprint modeling this is the right level of fidelity: the WSEG-10
+footprint of a field is driven by the field's *extent and where the flights
+are*, not by meter-accurate silo positions. Faithful here: the count (150 LF +
+15 LCC/wing), the flight organization, and now the real per-flight locations.
+Approximate: the exact silo placement within each flight. Swap in a sourced
+per-LF coordinate set (and set geography_mode="observed") to make this a real
+coordinate product.
 ==============================================================================
 
 Nothing in `targets.py` changes: `load_targets()` still returns the original
@@ -55,22 +60,30 @@ from .targets import load_targets
 # This is a VERSIONED dataset, not a one-off: silo geography is expected to be
 # refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
 # facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
-DATASET_VERSION = "2025.1-synthetic"
+DATASET_VERSION = "2025.2-mapanchored"
 VERIFY_DATE = "2026-07-13"
 
-# Provenance for what IS asserted about the fields: the COUNT and ORGANIZATION,
-# not the individual coordinates.
+# Provenance. Flight ORGANIZATION and each flight's approximate geographic AREA
+# are now anchored to public USAF missile site maps (flights sit at real,
+# documented locations near named towns). What is STILL approximate: the
+# position of each individual launch facility WITHIN its flight -- the source
+# maps are explicitly "not to scale" (and the Warren map is historical,
+# 200-missile / 20-flight era), so per-silo coordinates cannot be digitized
+# from them. Those points remain geography_mode="synthetic".
 _STRUCTURE_SOURCE = (
-    "GAO 2025 (450 Minuteman III silos; 400 deployed ICBMs) + USAF wing "
-    "descriptions (3 squadrons x 5 flights x (10 LF + 1 MAF/LCC) per wing). "
-    "COUNT and ORGANIZATION only -- individual facility coordinates are NOT "
-    "publicly sourced here."
+    "Flight organization + approximate flight locations from PUBLIC USAF "
+    "missile site maps (F.E. Warren 'Missile Site Map, Space Command'; "
+    "equivalent public 91 MW/Minot and 341 MW/Malmstrom field maps). Those maps "
+    "are NOT TO SCALE and partly historical. Flight CENTERS are anchored to the "
+    "documented flight areas / named towns on those maps; INDIVIDUAL launch-"
+    "facility positions within each flight are scattered around the center and "
+    "are NOT surveyed coordinates. Force structure (150 LF + 15 LCC per wing; "
+    "450 silos total) per GAO 2025."
 )
-_STRUCTURE_PUB_DATE = "2025"
-# Field-scale positional uncertainty for a synthetic point placed somewhere in a
-# ~1-2 degree field: order tens of km. Deliberately large -- these are not
-# survey coordinates.
-_SYNTHETIC_ACCURACY_M = 30000.0
+_STRUCTURE_PUB_DATE = "public USAF site maps (historical/undated); count GAO 2025"
+# Flight-scale positional uncertainty: each point sits within its real flight
+# area (~10-20 km across) but its exact spot is approximate.
+_SYNTHETIC_ACCURACY_M = 15000.0
 
 # --- Minuteman III wing footprints (public, documented) ----------------------
 # Each footprint is an approximate geographic bounding box of the wing's
@@ -78,30 +91,89 @@ _SYNTHETIC_ACCURACY_M = 30000.0
 # missile field lies. These are field EXTENTS, not silo coordinates.
 
 
+# Flight anchors read from the public USAF missile site maps. Each entry is
+# (flight_letter, lat, lon) placed at the flight's real documented area (near
+# the named town). These are APPROXIMATE (maps are not-to-scale); the letters
+# follow the current 15-flight structure, not the historical 20-flight Warren
+# map. Coordinates are ordinary public town/area geography.
+FlightAnchor = tuple[str, float, float]
+
+
 @dataclass(frozen=True)
 class Wing:
     name: str            # short wing label used in target names
     base: str            # host base
-    lon_min: float
+    seed: int
+    flights: tuple[FlightAnchor, ...]   # 15 map-anchored flight centers
+    lon_min: float       # footprint bbox (encompasses anchors + LF scatter)
     lon_max: float
     lat_min: float
     lat_max: float
-    seed: int
 
 
-# 90th Missile Wing -- F.E. Warren AFB. Largest field by area: SE Wyoming,
-# the western Nebraska panhandle, and northern Colorado.
-WARREN = Wing("90 MW", "F.E. Warren AFB", -104.90, -102.20, 40.50, 42.20, 9001)
+# 90th MW -- F.E. Warren AFB: SE Wyoming + W Nebraska panhandle + NE Colorado.
+_WARREN_FLIGHTS: tuple[FlightAnchor, ...] = (
+    ("A", 41.18, -104.05),  # Pine Bluffs WY
+    ("B", 41.04, -104.32),  # Carpenter WY
+    ("C", 41.42, -104.12),  # Albin WY
+    ("D", 41.58, -104.15),  # Meriden / Hawk Springs WY
+    ("E", 41.76, -104.60),  # Chugwater WY
+    ("F", 41.98, -104.35),  # Torrington WY area
+    ("G", 41.24, -103.66),  # Kimball NE
+    ("H", 41.32, -103.95),  # Bushnell NE
+    ("I", 41.55, -103.74),  # Harrisburg NE
+    ("J", 41.66, -103.10),  # Bridgeport NE
+    ("K", 41.14, -103.00),  # Sidney NE
+    ("L", 41.16, -102.62),  # Lodgepole NE
+    ("M", 40.62, -103.21),  # Sterling CO
+    ("N", 40.60, -103.82),  # New Raymer CO
+    ("O", 40.70, -104.10),  # Keota CO
+)
+WARREN = Wing("90 MW", "F.E. Warren AFB", 9001, _WARREN_FLIGHTS, -104.95, -102.35, 40.40, 42.20)
 
-# 341st Missile Wing -- Malmstrom AFB, central Montana around Great Falls.
-MALMSTROM = Wing("341 MW", "Malmstrom AFB", -112.40, -109.10, 46.80, 48.45, 9002)
+# 341st MW -- Malmstrom AFB: around Great Falls MT, NW lobe + E toward Lewistown.
+_MALMSTROM_FLIGHTS: tuple[FlightAnchor, ...] = (
+    ("A", 48.30, -111.80),  # Shelby / Ledger MT
+    ("B", 48.10, -111.95),  # Conrad MT
+    ("C", 47.88, -112.10),  # Brady / Choteau MT
+    ("D", 47.62, -111.99),  # Fairfield MT
+    ("E", 47.50, -111.90),  # Simms / Sun River MT
+    ("F", 47.38, -110.93),  # Belt MT
+    ("G", 47.27, -110.73),  # Raynesford MT
+    ("H", 47.55, -110.55),  # Geyser MT
+    ("I", 47.15, -110.22),  # Stanford MT
+    ("J", 47.32, -109.95),  # Denton MT
+    ("K", 47.58, -110.26),  # Geraldine MT
+    ("L", 47.06, -109.43),  # Lewistown MT
+    ("M", 47.56, -109.38),  # Winifred MT
+    ("N", 46.99, -109.87),  # Hobson / Moore MT
+    ("O", 46.68, -109.75),  # Judith Gap MT
+)
+MALMSTROM = Wing("341 MW", "Malmstrom AFB", 9002, _MALMSTROM_FLIGHTS, -112.45, -108.60, 46.35, 48.60)
 
-# 91st Missile Wing -- Minot AFB, northwestern North Dakota.
-MINOT = Wing("91 MW", "Minot AFB", -102.45, -100.35, 47.85, 48.95, 9003)
+# 91st MW -- Minot AFB: broad ring around Minot ND.
+_MINOT_FLIGHTS: tuple[FlightAnchor, ...] = (
+    ("A", 48.67, -102.08),  # Kenmare ND
+    ("B", 48.56, -102.55),  # Powers Lake / Ross ND
+    ("C", 48.32, -102.39),  # Stanley ND
+    ("D", 48.31, -101.74),  # Berthold ND
+    ("E", 48.44, -101.71),  # Carpio ND
+    ("F", 48.77, -101.52),  # Mohall ND
+    ("G", 48.90, -101.63),  # Sherwood ND
+    ("H", 48.52, -101.22),  # Glenburn ND
+    ("I", 48.38, -100.88),  # Deering / Granville ND
+    ("J", 48.35, -100.45),  # Towner ND
+    ("K", 48.06, -100.93),  # Velva ND
+    ("L", 47.92, -100.42),  # Drake ND
+    ("M", 47.85, -101.30),  # Max ND
+    ("N", 47.94, -101.70),  # Ryder / Makoti ND
+    ("O", 47.66, -101.42),  # Garrison ND
+)
+MINOT = Wing("91 MW", "Minot AFB", 9003, _MINOT_FLIGHTS, -102.70, -100.30, 47.55, 48.98)
 
 WINGS = (WARREN, MALMSTROM, MINOT)
 
-# Real Minuteman III wing structure.
+# Real Minuteman III wing structure (current force).
 SQUADRONS_PER_WING = 3
 FLIGHTS_PER_SQUADRON = 5
 LF_PER_FLIGHT = 10
@@ -109,45 +181,20 @@ FLIGHTS_PER_WING = SQUADRONS_PER_WING * FLIGHTS_PER_SQUADRON  # 15
 LF_PER_WING = FLIGHTS_PER_WING * LF_PER_FLIGHT                # 150
 LCC_PER_WING = FLIGHTS_PER_WING                              # 15
 
-# A flight's LFs are spread over a real area (an LCC controls 10 LFs dispersed
-# so no single weapon takes out the flight). This is the scatter radius, in
-# degrees, of LFs about their flight center -- a rough public-knowledge spacing,
-# not a surveyed value.
-_FLIGHT_SPREAD_DEG = 0.18
-
-
-def _flight_centers(wing: Wing, rng: random.Random) -> list[tuple[float, float]]:
-    """Place FLIGHTS_PER_WING flight centers across the wing footprint.
-
-    Uses a jittered near-square grid so flights tile the field roughly evenly
-    (as real dispersed fields do) rather than clumping. Deterministic given the
-    wing's seed.
-    """
-    import math
-
-    n = FLIGHTS_PER_WING
-    cols = int(math.ceil(math.sqrt(n)))
-    rows = int(math.ceil(n / cols))
-    centers: list[tuple[float, float]] = []
-    lon_span = wing.lon_max - wing.lon_min
-    lat_span = wing.lat_max - wing.lat_min
-    for i in range(n):
-        r, c = divmod(i, cols)
-        # cell center in [0,1] grid space, then jittered within the cell
-        fx = (c + 0.5) / cols + rng.uniform(-0.25, 0.25) / cols
-        fy = (r + 0.5) / rows + rng.uniform(-0.25, 0.25) / rows
-        lon = wing.lon_min + fx * lon_span
-        lat = wing.lat_min + fy * lat_span
-        centers.append((lon, lat))
-    return centers
+# A flight's LFs are dispersed over a real area (an LCC controls 10 LFs spread
+# out so no single weapon takes out the flight). Scatter radius, in degrees, of
+# LFs about their (now map-anchored) flight center -- ~10-15 km, approximate.
+_FLIGHT_SPREAD_DEG = 0.14
 
 
 def generate_wing(wing: Wing) -> list[Target]:
     """150 launch facilities + 15 launch control centers for one wing.
 
-    See the module-level HONESTY NOTE: positions are an illustrative
-    distribution within the wing's documented footprint, deterministic per
-    seed, not surveyed coordinates.
+    Each flight's LCC is placed at its map-anchored real location (see the
+    per-wing FlightAnchor tables, from public USAF site maps); its 10 LFs are
+    scattered around that center. Flight LOCATIONS are documented/real; the
+    individual LF positions within a flight are approximate (deterministic per
+    seed), NOT surveyed coordinates -- see the module provenance note.
     """
     rng = random.Random(wing.seed)
     wing_slug = wing.name.replace(" ", "")  # e.g. "90MW"
@@ -167,10 +214,9 @@ def generate_wing(wing: Wing) -> list[Target]:
         )
 
     out: list[Target] = []
-    for f_idx, (clon, clat) in enumerate(_flight_centers(wing, rng), start=1):
+    for f_idx, (flight_letter, clat, clon) in enumerate(wing.flights, start=1):
         squadron = (f_idx - 1) // FLIGHTS_PER_SQUADRON + 1
-        flight_letter = chr(ord("A") + (f_idx - 1))
-        # One LCC (missile alert facility) at the flight center.
+        # One LCC (missile alert facility) at the map-anchored flight center.
         out.append(
             _synthetic(
                 id=f"{wing_slug}-{flight_letter}-LCC",
@@ -180,7 +226,7 @@ def generate_wing(wing: Wing) -> list[Target]:
                 category="icbm_lcc",
                 site_type="launch_control_center",
                 designator=f"{flight_letter}-01",
-                note=f"{wing.base} launch control center (SYNTHETIC position)",
+                note=f"{wing.base} flight {flight_letter} LCC (map-anchored; position approximate)",
             )
         )
         # Ten LFs scattered around the flight center.
