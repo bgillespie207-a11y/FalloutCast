@@ -482,22 +482,27 @@ async function computeExchangeEnvelope(): Promise<void> {
 
   try {
     await ensureMapReady();
-    const resp = await fetchExchangeEnvelope({
-      yield_mt: Number(yieldInput.value),
-      fission_fraction: Number(ffInput.value),
-    });
+    const resp = await fetchExchangeEnvelope("max_single_source");
     disclaimerEl.textContent = resp.disclaimer;
     await plotTargetMarkers();
     map.flyTo({ center: [-98.5, 39.8], zoom: 3.3 });
 
     writeUrlState({ mode: "exchange" });
     const validHour = resp.weather ? ` · winds valid ${resp.weather.valid_time}Z` : "";
-    statusEl.textContent = `Envelope computed across ${resp.n_targets} target(s).${validHour}`;
+    statusEl.textContent =
+      `Max-single-source envelope across ${resp.n_targets} target(s).${validHour}`;
     renderPlainNotes(resp.notes);
     renderStaticContours(resp.contours);
-    // Carry weather provenance into the export so a downloaded envelope records
-    // which forecast hour produced it.
-    exportGeoJson = { ...resp.contours, weather: resp.weather ?? undefined } as GeoJsonFeatureCollection;
+    // Carry the full provenance (weather, aggregation, yield policy, in/excluded
+    // targets) into the export -- not just anonymous contours.
+    exportGeoJson = {
+      ...resp.contours,
+      weather: resp.weather ?? undefined,
+      aggregation: resp.aggregation,
+      yield_policy: resp.yield_policy,
+      included_target_ids: resp.included_target_ids,
+      excluded_target_ids: resp.excluded_target_ids,
+    } as GeoJsonFeatureCollection;
     exportBtn.hidden = false;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);

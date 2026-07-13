@@ -46,6 +46,7 @@ class PlumeResponse(BaseModel):
 
 
 class Target(BaseModel):
+    id: str = ""  # stable identifier (see targetdeck); used for included/excluded reporting
     name: str
     lat: float
     lon: float
@@ -106,17 +107,22 @@ class WeatherProvenance(BaseModel):
 
 
 class ExchangeEnvelopeResponse(BaseModel):
-    """True national max-envelope dose surface (PRD.md M2) -- one composite
-    grid/contour set across all targets, not a per-target overlay (contrast
-    the plain dict `/exchange` returns)."""
+    """Composite dose surface across the curated target deck -- one grid/contour
+    set, not a per-target overlay (contrast the plain dict `/exchange` returns).
 
-    yield_mt: float
-    fission_fraction: float
+    NOTE on semantics: `aggregation="max_single_source"` is a SCREENING envelope
+    (worst dose from any ONE target at each point), NOT a combined-exchange
+    total; `aggregation="sum"` adds overlapping contributions. See `notes`."""
+
     n_targets: int
+    aggregation: str                       # "max_single_source" or "sum"
+    yield_policy: dict                     # scenario/uniform yield assumptions (see scenario.py)
+    included_target_ids: list[str] = []    # targets that contributed
+    excluded_target_ids: list[str] = []    # targets dropped (e.g. wind-fetch failure)
     disclaimer: str
     notes: list[str] = []
     weather: Optional[WeatherProvenance] = None
-    contours: dict  # one FeatureCollection: max H+1 dose rate from ANY target
+    contours: dict  # one FeatureCollection of isodose contours
 
 
 DISCLAIMER = (

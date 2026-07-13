@@ -54,10 +54,7 @@ export interface Target {
   note: string;
 }
 
-export interface ExchangeEnvelopeRequest {
-  yield_mt: number;
-  fission_fraction: number;
-}
+export type Aggregation = "max_single_source" | "sum";
 
 export interface WeatherProvenance {
   valid_time: string;
@@ -66,10 +63,28 @@ export interface WeatherProvenance {
   age_seconds: number | null;
 }
 
+export interface YieldPolicy {
+  scenario: string;
+  mode: string;
+  surface_burst_caveat: string;
+  assumptions?: Array<{
+    category: string;
+    yield_mt: number;
+    yield_min_mt: number;
+    yield_max_mt: number;
+    fission_fraction: number;
+    rationale: string;
+  }>;
+  yield_mt?: number;
+  fission_fraction?: number;
+}
+
 export interface ExchangeEnvelopeResponse {
-  yield_mt: number;
-  fission_fraction: number;
   n_targets: number;
+  aggregation: Aggregation;
+  yield_policy: YieldPolicy;
+  included_target_ids: string[];
+  excluded_target_ids: string[];
   disclaimer: string;
   notes: string[];
   weather?: WeatherProvenance | null;
@@ -133,15 +148,13 @@ export function fetchTargets(expanded = false): Promise<Target[]> {
   });
 }
 
-// /exchange/envelope takes query params, not a JSON body (see schemas.py) --
-// no Pydantic request model on that endpoint, unlike /plume.
+// /exchange/envelope takes query params, not a JSON body. Under the default
+// per-class scenario the yields come from scenario.py (not the frontend), so no
+// yield params are sent -- only the aggregation policy.
 export async function fetchExchangeEnvelope(
-  req: ExchangeEnvelopeRequest,
+  aggregation: Aggregation = "max_single_source",
 ): Promise<ExchangeEnvelopeResponse> {
-  const params = new URLSearchParams({
-    yield_mt: String(req.yield_mt),
-    fission_fraction: String(req.fission_fraction),
-  });
+  const params = new URLSearchParams({ aggregation });
   const resp = await fetch(`${__API_URL__}/exchange/envelope?${params}`, { method: "POST" });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => resp.statusText);

@@ -74,6 +74,15 @@ CONUS_LON_MIN, CONUS_LON_MAX = -125.5, -66.0
 CONUS_LAT_MIN, CONUS_LAT_MAX = 24.0, 50.0
 
 
+# Aggregation policies for compositing many targets onto one grid.
+#   "max"  -- cell-wise MAX: the worst dose from ANY SINGLE source at each point.
+#             A screening envelope, NOT a combined-exchange total.
+#   "sum"  -- cell-wise SUM: dose contributions from overlapping plumes ADD, a
+#             simultaneous-detonation total at H+1. Still not time-aligned for
+#             staggered arrivals (a documented future step).
+AGGREGATIONS = ("max", "sum")
+
+
 def sample_envelope(
     models: list[tuple[WSEG10, float, float]],
     *,
@@ -81,8 +90,9 @@ def sample_envelope(
     lat_bounds: tuple[float, float] = (CONUS_LAT_MIN, CONUS_LAT_MAX),
     resolution_deg: float = 0.1,
     radius_deg: float | None = None,
+    aggregation: str = "max",
 ) -> DoseGridLonLat:
-    """Composite max-envelope dose-rate grid across multiple ground zeros.
+    """Composite a dose-rate grid across multiple ground zeros.
 
     `models` is a list of (WSEG10 model, ground-zero lat, ground-zero lon)
     triples -- one per target, each already carrying its own wind. For every
@@ -91,28 +101,32 @@ def sample_envelope(
     equirectangular approximation centered on THAT target's own latitude,
     matching `contour.to_geojson`'s inverse conversion -- accurate near each
     target, which is what matters since WSEG-10 dose decays to ~0 within a
-    few hundred miles), evaluates that target's dose rate there, and takes
-    the cell-wise MAX across all targets. This is a true national
-    max-envelope surface (PRD.md M2), not a per-target overlay: one grid,
-    one contour set, answering "what's the worst H+1 dose rate at this point
-    from ANY of these targets" rather than returning N separate plumes.
+    few hundred miles) and evaluates that target's dose rate there.
 
-    `resolution_deg` trades accuracy for the O(len(models) * grid_size) cost
-    of evaluating every target's (vectorized, but not free) analytic dose
-    function at every grid cell. 0.1 deg (~7 mi) is a reasonable default for
-    ~10 CONUS-scale targets; there is no caching yet (PRD.md's "aggressive
-    per-met-run caching" is a documented future step, not implemented here).
+    `aggregation` (see AGGREGATIONS) chooses how per-target contributions
+    combine at each cell: "max" is the max-single-source screening envelope
+    (the worst dose from any ONE target -- NOT a combined total); "sum" adds
+    overlapping contributions for a simultaneous H+1 total. This is one grid,
+    one contour set -- not a per-target overlay.
+
+    `resolution_deg` trades accuracy for the O(len(models) * grid_size) cost of
+    evaluating every target's (vectorized, but not free) analytic dose function.
+    0.1 deg (~7 mi) is a reasonable default.
 
     `radius_deg` is a scaling optimization for large decks (e.g. the ~500-point
     expanded target deck in `targetdeck.py`): instead of evaluating every
     target against the entire CONUS grid, evaluate each target only within a
-    +/-`radius_deg` lon/lat window around its own ground zero, and MAX just
+    +/-`radius_deg` lon/lat window around its own ground zero, and combine just
     that sub-block into the envelope. Cells outside every target's window stay
     zero -- which is correct as long as `radius_deg` comfortably exceeds the
-    plume reach (WSEG-10 dose decays to ~0 within a few hundred miles; ~8 deg
-    ~= 550 mi is safe for sub-megaton bursts). `None` (default) keeps the exact
+    plume reach (WSEG-10 dose decays to ~0 within a few hundred miles; ~10 deg
+    ~= 690 mi is safe for the deck's yields). `None` (default) keeps the exact
     original full-grid behavior, so existing results/tests are unchanged.
     """
+    if aggregation not in AGGREGATIONS:
+        raise ValueError(f"aggregation must be one of {AGGREGATIONS}, got {aggregation!r}")
+    combine = np.maximum if aggregation == "max" else np.add
+
     n_lon = int((lon_bounds[1] - lon_bounds[0]) / resolution_deg) + 1
     n_lat = int((lat_bounds[1] - lat_bounds[0]) / resolution_deg) + 1
     lon_axis = np.linspace(lon_bounds[0], lon_bounds[1], n_lon)
@@ -126,7 +140,7 @@ def sample_envelope(
             y_mi = (glat - gz_lat) * _MILES_PER_DEG_LAT
             x_mi = (glon - gz_lon) * _MILES_PER_DEG_LAT * np.cos(np.radians(gz_lat))
             dose = model.dose_rate_h1(x_mi, y_mi)
-            np.maximum(envelope, dose, out=envelope)
+            combine(envelope, dose, out=envelope)
         return DoseGridLonLat(lon_deg=lon_axis, lat_deg=lat_axis, dose_rate_h1=envelope)
 
     # Local-window path: only touch the sub-grid within radius_deg of each GZ.
@@ -142,6 +156,6 @@ def sample_envelope(
         x_mi = (sub_lon - gz_lon) * _MILES_PER_DEG_LAT * np.cos(np.radians(gz_lat))
         dose = model.dose_rate_h1(x_mi, y_mi)
         block = envelope[j0:j1, i0:i1]
-        np.maximum(block, dose, out=block)
+        combine(block, dose, out=block)
 
     return DoseGridLonLat(lon_deg=lon_axis, lat_deg=lat_axis, dose_rate_h1=envelope)

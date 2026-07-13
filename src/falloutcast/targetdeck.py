@@ -128,6 +128,7 @@ def generate_wing(wing: Wing) -> list[Target]:
     seed, not surveyed coordinates.
     """
     rng = random.Random(wing.seed)
+    wing_slug = wing.name.replace(" ", "")  # e.g. "90MW"
     out: list[Target] = []
     for f_idx, (clon, clat) in enumerate(_flight_centers(wing, rng), start=1):
         squadron = (f_idx - 1) // FLIGHTS_PER_SQUADRON + 1
@@ -135,6 +136,7 @@ def generate_wing(wing: Wing) -> list[Target]:
         # One LCC (missile alert facility) at the flight center.
         out.append(
             Target(
+                id=f"{wing_slug}-{flight_letter}-LCC",
                 name=f"{wing.name} {flight_letter}-01 LCC",
                 lat=round(clat, 4),
                 lon=round(clon, 4),
@@ -151,6 +153,7 @@ def generate_wing(wing: Wing) -> list[Target]:
             lat = min(max(lat, wing.lat_min), wing.lat_max)
             out.append(
                 Target(
+                    id=f"{wing_slug}-{flight_letter}-{lf:02d}",
                     name=f"{wing.name} {flight_letter}-{lf:02d}",
                     lat=round(lat, 4),
                     lon=round(lon, 4),
@@ -221,55 +224,30 @@ _HVT: list[tuple[str, float, float, str, str]] = [
 ]
 
 
+def _slug(name: str) -> str:
+    """Stable id slug from an HVT name (lowercase, alnum + hyphens)."""
+    out = []
+    prev_dash = False
+    for ch in name.lower():
+        if ch.isalnum():
+            out.append(ch)
+            prev_dash = False
+        elif not prev_dash:
+            out.append("-")
+            prev_dash = True
+    return "hvt-" + "".join(out).strip("-")
+
+
 def high_value_targets() -> list[Target]:
     return [
-        Target(name=n, lat=lat, lon=lon, category=cat, note=note)
+        Target(id=_slug(n), name=n, lat=lat, lon=lon, category=cat, note=note)
         for (n, lon, lat, cat, note) in _HVT
     ]
 
 
-# --- Per-target-class yields -------------------------------------------------
-# Representative (yield_mt, fission_fraction) per target category, so the
-# national envelope produces footprints that differ by target class rather than
-# one uniform yield everywhere. This is DESCRIPTIVE modeling (a silo gets a
-# counterforce-appropriate warhead, a city a countervalue-scale surface burst),
-# NOT weaponeering/yield-optimization -- the PRD non-goal is about anything that
-# increases lethality, which picking a representative public yield per class
-# does not.
-#
-# Sourcing, honestly:
-#   * Silos/LCCs at 0.30 Mt are grounded: the W87 on Minuteman III is ~300 kt
-#     and the W78 ~335-350 kt -- 0.30 Mt is a real, public, representative
-#     counterforce RV yield, not a guess.
-#   * The other classes are ILLUSTRATIVE, order-of-magnitude public values
-#     (hardened C2 / countervalue on the higher ~0.5 Mt tier, other military
-#     installations on the ~0.3 Mt tier), in the same "labeled, not surveyed"
-#     spirit as the silo coordinates above. Fission fraction is held at the
-#     project's 0.5 default everywhere -- varying it per class has no sourced
-#     basis, so it isn't invented here.
-_DEFAULT_YIELD_MT = 0.30
-_DEFAULT_FISSION = 0.5
-
-CATEGORY_YIELD: dict[str, tuple[float, float]] = {
-    # (yield_mt, fission_fraction)
-    "icbm_lf": (0.30, 0.5),          # W87/W78-class RV (~300-350 kt), sourced
-    "icbm_lcc": (0.30, 0.5),
-    "bomber_base": (0.30, 0.5),
-    "ssbn_base": (0.30, 0.5),
-    "storage": (0.30, 0.5),
-    "command": (0.50, 0.5),          # hardened C2 -> higher tier (illustrative)
-    "city_population": (0.50, 0.5),  # countervalue surface burst (illustrative)
-    "industry": (0.50, 0.5),         # (illustrative)
-}
-
-# Largest per-class yield, so callers can size a plume-reach window (the
-# envelope's local-evaluation radius) that stays safe for every class.
-MAX_CATEGORY_YIELD_MT = max(y for y, _ in CATEGORY_YIELD.values())
-
-
-def yield_for(category: str) -> tuple[float, float]:
-    """Representative (yield_mt, fission_fraction) for a target category."""
-    return CATEGORY_YIELD.get(category, (_DEFAULT_YIELD_MT, _DEFAULT_FISSION))
+# NOTE: per-class INCOMING yields are an attacker-scenario assumption, not a
+# target attribute -- they live in `scenario.py` (see its docstring for why),
+# not here. This module is target metadata only.
 
 
 # --- Assembly ----------------------------------------------------------------

@@ -100,27 +100,41 @@ npm --prefix web run dev            # http://localhost:5173
 
 Tick **"Full nuclear exchange"** → **Compute national envelope**.
 
-## Per-target-class yields (done)
+## Attack-scenario yields (done — reframed)
 
-Each target now carries a representative yield for its class instead of one
-uniform value, so footprints differ by target type (`targetdeck.CATEGORY_YIELD`,
-`?per_class=true`, the envelope default):
+Incoming-burst yields are an **attacker-scenario assumption**, not the target's
+resident weapon, and they live in `scenario.py` — **separate from target
+metadata** (`targetdeck.py`). Deriving a silo's burst yield from the W87/W78 the
+silo *carries* was a category error (that weapon isn't what detonates on it);
+the reframed model uses representative incoming yields for a generic modern
+strike, with explicit min/max sensitivity bands:
 
-- **Silos / LCCs → 0.30 Mt.** Grounded, not invented: the W87 on Minuteman III
-  is ~300 kt and the W78 ~335–350 kt.
-- **Countervalue (population, industry) and hardened C2 → 0.50 Mt.**
-  Illustrative order-of-magnitude public values, same "labeled, not surveyed"
-  posture as the silo coordinates.
-- Fission fraction held at the project's 0.5 default (varying it per class has
-  no sourced basis).
+- **Counterforce classes (silos, LCCs, bases, storage) → 0.30 Mt** (band
+  0.30–0.50), a few-hundred-kt-class hard-target RV — illustrative.
+- **Countervalue / hardened C2 (population, industry, command) → 0.50 Mt**
+  (band 0.30–1.00) — illustrative.
+- Fission fraction held at 0.5 (no sourced per-class basis).
 
-This is *descriptive* modeling (a class-appropriate warhead per target), not
-weaponeering/yield-optimization. Mechanically: the bucketed wind fetch now
-returns the raw profile per bucket and `reduce_profile` (which depends on yield
-via cloud-top height) is redone per target, so targets in one bucket can differ
-in yield while still sharing one network call. `?per_class=false` restores a
-single uniform yield. The frontend hides the global yield input in exchange mode
-and shows the per-class summary instead.
+The API reports this as a structured `yield_policy` (per-class nominal + band +
+rationale), replacing the old `yield_mt: 0.0` sentinel, and always states the
+**surface-burst bounding caveat** (surface bursts at *every* site, including
+cities — a fallout-maximizing case, not a neutral forecast). `?per_class=false`
+uses a single uniform `uniform_yield_mt`/`uniform_fission_fraction` instead.
+
+## Exchange semantics + API (done)
+
+- **Aggregation policy** (`?aggregation=`): `max_single_source` (default) is a
+  **screening envelope** — the worst H+1 dose from any *one* target at each
+  point, NOT a combined total; `sum` adds overlapping contributions (a
+  simultaneous total, not yet time-aligned). The UI label and response say which.
+- **Honest naming:** "Full nuclear exchange / all public targets" → "Curated
+  target deck — max-single-source surface-burst envelope". The deck is curated
+  and incomplete; silo positions are synthetic.
+- **Validation:** query params use `Query(gt=0)` / `(le=1)` so bad input returns
+  **422**, not 500. Invalid `aggregation` also 422s.
+- **Provenance in the response + export:** `aggregation`, `yield_policy`,
+  `included_target_ids`, `excluded_target_ids`, and `weather` — not anonymous
+  contours. Excluded (wind-fetch-failed) targets are reported by id.
 
 ## Wind caching (done)
 

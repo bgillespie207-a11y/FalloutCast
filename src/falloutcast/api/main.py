@@ -21,10 +21,10 @@ import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from .. import contour, grid, targetdeck, targets as targets_mod
+from .. import contour, grid, scenario, targetdeck, targets as targets_mod
 from ..physics import decay, ensemble
 from ..physics import tier1
 from ..physics.wseg10 import WSEG10, cloud_top_height_m
@@ -336,7 +336,7 @@ _WIND_FETCH_CONCURRENCY = 8
 
 async def _build_models_bucketed(
     tgts: list[Target], yield_fn, *, valid_time: str | None = None
-) -> tuple[list[tuple[WSEG10, float, float]], list[str], dict]:
+) -> tuple[list[tuple[WSEG10, float, float]], list[Target], list[Target], dict]:
     """Build one WSEG-10 model per target, sharing a single fetched wind
     *profile* across all targets in the same ~1-degree bucket. Returns
     (models, failed_names).
@@ -390,12 +390,13 @@ async def _build_models_bucketed(
     )
 
     models: list[tuple[WSEG10, float, float]] = []
-    failed: list[str] = []
+    included: list[Target] = []
+    excluded: list[Target] = []
     oldest_retrieved = 0.0
     for k, res in zip(keys, results):
         members = buckets[k]
         if isinstance(res, Exception):
-            failed.extend(m.name for m in members)
+            excluded.extend(members)
             continue
         profile = res
         if profile.retrieved_at:
@@ -412,9 +413,10 @@ async def _build_models_bucketed(
                 shear_mph_per_kft=eff.shear_mph_per_kft,
             )
             models.append((model, t.lat, t.lon))
+            included.append(t)
 
     provenance = _weather_provenance(vt, oldest_retrieved)
-    return models, failed, provenance
+    return models, included, excluded, provenance
 
 
 def _weather_provenance(valid_time: str, retrieved_at: float) -> dict:
@@ -432,89 +434,116 @@ def _weather_provenance(valid_time: str, retrieved_at: float) -> dict:
     }
 
 
+# API-facing aggregation names (the honest labels) -> grid.sample_envelope names.
+_AGGREGATION_MAP = {"max_single_source": "max", "sum": "sum"}
+
+
 @app.post("/exchange/envelope", response_model=ExchangeEnvelopeResponse)
 async def exchange_envelope(
-    yield_mt: float = 0.3,
-    fission_fraction: float = 0.5,
     expanded: bool = True,
     per_class: bool = True,
+    aggregation: str = Query(
+        "max_single_source",
+        description="max_single_source (screening: worst dose from any ONE target) "
+        "| sum (adds overlapping contributions)",
+    ),
+    uniform_yield_mt: float = Query(
+        0.3, gt=0, description="uniform incoming yield (Mt); used only when per_class=false"
+    ),
+    uniform_fission_fraction: float = Query(
+        0.5, gt=0, le=1.0, description="uniform fission fraction; used only when per_class=false"
+    ),
 ) -> ExchangeEnvelopeResponse:
-    """True national max-envelope dose surface (PRD.md M2).
+    """Composite dose surface over the CURATED target deck (not "all targets").
 
-    Unlike `/exchange` (a per-target overlay -- N separate plumes returned
-    side by side), this composites all targets onto ONE shared CONUS grid and
-    takes the cell-wise MAX H+1 dose rate across targets, then contours that
-    single composite field. It answers "what's the worst dose rate at this
-    point from ANY of these targets," which an overlay of separate contour
-    sets cannot directly show without a human eyeballing overlaps.
+    IMPORTANT -- what the aggregation means:
+      * `max_single_source` (default): a SCREENING envelope -- at each point, the
+        worst H+1 dose from any ONE target. It does NOT sum overlapping plumes,
+        so it is not a combined-exchange total.
+      * `sum`: adds overlapping H+1 contributions (a simultaneous-detonation
+        total; not yet time-aligned for staggered fallout arrival).
 
-    `expanded=true` (default) uses the full national deck: the three Minuteman
-    fields resolved to their individual launch facilities/control centers plus
-    curated high-value targets (see targetdeck.py) -- ~500+ ground zeros.
-    `expanded=false` keeps the original 10-installation set.
+    `expanded=true` (default) uses the full curated deck (three Minuteman fields
+    resolved to individual LFs/LCCs + curated high-value targets, ~500+ ground
+    zeros); `expanded=false` uses the 10 curated installations.
 
-    `per_class=true` (default) gives each target a representative yield for its
-    class (silos ~0.30 Mt W87-class, countervalue/hardened-C2 ~0.50 Mt; see
-    `targetdeck.CATEGORY_YIELD`) so footprints differ by target type. In that
-    mode the `yield_mt`/`fission_fraction` query params are ignored. Set
-    `per_class=false` to force one uniform `yield_mt`/`fission_fraction` across
-    every target (the original behavior).
+    `per_class=true` (default) applies the attack-SCENARIO incoming yields per
+    target class (see `scenario.py` -- these are attacker assumptions, NOT the
+    target's resident weapon), reported in `yield_policy`. Set `per_class=false`
+    to use one uniform `uniform_yield_mt`/`uniform_fission_fraction`.
 
-    Winds are fetched per ~1-degree bucket, concurrently, and shared across
-    targets in a bucket (see `_build_models_bucketed`); a bucket whose wind
-    fetch fails excludes its targets (not fatal) and they're named in notes.
-    For the large deck each target's dose is evaluated only within a local
-    window of its ground zero (`radius_deg`), which is what makes ~500 targets
-    tractable in one grid pass.
+    Winds are fetched per ~1-degree bucket, concurrently, all at one shared
+    forecast valid hour; a bucket whose fetch fails excludes its targets (not
+    fatal) -- see `included_target_ids`/`excluded_target_ids`.
     """
+    if aggregation not in _AGGREGATION_MAP:
+        raise HTTPException(
+            status_code=422,
+            detail=f"aggregation must be one of {list(_AGGREGATION_MAP)}, got {aggregation!r}",
+        )
+
     tgts = targetdeck.load_expanded_targets() if expanded else targets_mod.load_targets()
 
     if per_class:
-        yield_fn = lambda t: targetdeck.yield_for(t.category)  # noqa: E731
+        yield_fn = lambda t: scenario.yield_for(t.category)  # noqa: E731
     else:
-        yield_fn = lambda t: (yield_mt, fission_fraction)  # noqa: E731
+        yield_fn = lambda t: (uniform_yield_mt, uniform_fission_fraction)  # noqa: E731
 
-    models, failed, weather = await _build_models_bucketed(tgts, yield_fn)
+    models, included, excluded, weather = await _build_models_bucketed(tgts, yield_fn)
     if not models:
         raise HTTPException(status_code=502, detail="wind fetch failed for all targets")
 
     # Full grid for the small set (exact, cheap); local-window path for the big
-    # deck (bounded cost per target). Sized comfortably beyond the reach of the
-    # largest yield in play so no plume tail is clipped.
+    # deck. Sized beyond the reach of the largest scenario yield so no tail clips.
     radius = 10.0 if expanded else None
-    g = grid.sample_envelope(models, radius_deg=radius)
+    g = grid.sample_envelope(models, radius_deg=radius, aggregation=_AGGREGATION_MAP[aggregation])
     gj = contour.to_geojson_lonlat(g)
 
-    notes = [
-        f"Max H+1 dose rate at each point from any of {len(models)} ground zeros, "
-        "on one shared CONUS grid -- not a per-target overlay.",
-    ]
     if per_class:
-        notes.append(
-            "Per-target-class yields: silos/LCCs ~0.30 Mt (W87/W78-class RV), "
-            "countervalue and hardened C2 ~0.50 Mt; illustrative public values, "
-            "not a targeting product (see targetdeck.CATEGORY_YIELD)."
-        )
+        yield_policy = scenario.yield_policy({t.category for t in included})
     else:
-        notes.append(f"Uniform {yield_mt:g} Mt across all targets.")
+        yield_policy = {
+            "scenario": "uniform",
+            "mode": "uniform",
+            "surface_burst_caveat": scenario.SURFACE_BURST_CAVEAT,
+            "yield_mt": uniform_yield_mt,
+            "fission_fraction": uniform_fission_fraction,
+        }
+
+    agg_desc = (
+        "worst H+1 dose from any ONE target (screening envelope -- NOT a combined total)"
+        if aggregation == "max_single_source"
+        else "sum of overlapping H+1 contributions (simultaneous total, not time-aligned)"
+    )
+    notes = [
+        f"Aggregation '{aggregation}': at each point, {agg_desc}. "
+        f"{len(included)} target(s) on one shared CONUS grid.",
+        scenario.SURFACE_BURST_CAVEAT,
+    ]
     if expanded:
         notes.append(
-            "Deck includes the three Minuteman fields resolved to individual "
-            "launch facilities/control centers (illustrative distribution within "
-            "the documented field footprints, not surveyed silo coordinates) plus "
-            "curated public high-value targets."
+            "Curated deck: the three Minuteman fields resolved to individual "
+            "launch facilities/control centers (SYNTHETIC illustrative positions "
+            "within documented field footprints, not surveyed coordinates) plus a "
+            "curated, incomplete set of high-value targets."
         )
-    if failed:
-        shown = ", ".join(failed[:5]) + (f", +{len(failed) - 5} more" if len(failed) > 5 else "")
-        notes.append(f"Excluded {len(failed)} target(s) with failed wind fetch: {shown}.")
+    if excluded:
+        ex_ids = [t.id for t in excluded]
+        shown = ", ".join(ex_ids[:5]) + (f", +{len(ex_ids) - 5} more" if len(ex_ids) > 5 else "")
+        notes.append(f"Excluded {len(excluded)} target(s) with failed wind fetch: {shown}.")
     notes.append(
         f"Winds valid {weather['valid_time']}Z from {weather['model']}"
         + (f", retrieved {weather['retrieved_at']}." if weather["retrieved_at"] else ".")
     )
 
-    # Reported yield: the uniform value, or the class span when per-class.
-    reported_yield = 0.0 if per_class else yield_mt
     return ExchangeEnvelopeResponse(
-        yield_mt=reported_yield, fission_fraction=fission_fraction, n_targets=len(models),
-        disclaimer=DISCLAIMER, notes=notes, contours=gj, weather=weather,
+        n_targets=len(models),
+        aggregation=aggregation,
+        yield_policy=yield_policy,
+        included_target_ids=[t.id for t in included],
+        excluded_target_ids=[t.id for t in excluded],
+        disclaimer=DISCLAIMER,
+        notes=notes,
+        weather=weather,
+        contours=gj,
     )

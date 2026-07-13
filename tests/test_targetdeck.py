@@ -47,36 +47,16 @@ def test_expanded_deck_supersedes_single_point_icbm_fields():
     assert any(t.category == "command" for t in full)
 
 
-def test_per_class_yields_differentiate_silos_from_cities():
-    """Silos carry the sourced ~0.30 Mt counterforce yield; countervalue/
-    hardened-C2 classes carry a higher illustrative yield. yield_for must
-    reflect that (so footprints differ by class) and fall back cleanly."""
-    silo_y, silo_ff = targetdeck.yield_for("icbm_lf")
-    city_y, _ = targetdeck.yield_for("city_population")
-    assert silo_y == 0.30
-    assert 0.0 < silo_ff <= 1.0
-    assert city_y > silo_y  # bigger yield -> larger footprint, the whole point
-    # unknown category -> documented default, never a crash
-    assert targetdeck.yield_for("nonexistent") == (0.30, 0.5)
-
-
-def test_higher_class_yield_produces_a_larger_footprint():
-    """Sanity that a city's yield actually makes a bigger plume than a silo's
-    under identical wind -- confirms the per-class table feeds through WSEG-10
-    the way the feature intends."""
-    silo_y, silo_ff = targetdeck.yield_for("icbm_lf")
-    city_y, city_ff = targetdeck.yield_for("city_population")
-    wind = dict(wind_mph=15.0, wind_dir_deg=90.0, shear_mph_per_kft=0.5)
-    silo = WSEG10(yield_mt=silo_y, fission_fraction=silo_ff, **wind)
-    city = WSEG10(yield_mt=city_y, fission_fraction=city_ff, **wind)
-    # area above 1 R/hr on a shared local grid
-    g = grid.sample_envelope  # noqa: F841 (documenting intent)
-    import numpy as np
-    axis = np.linspace(-300, 300, 121)
-    gx, gy = np.meshgrid(axis, axis)
-    silo_area = (silo.dose_rate_h1(gx, gy) >= 1.0).sum()
-    city_area = (city.dose_rate_h1(gx, gy) >= 1.0).sum()
-    assert city_area > silo_area
+def test_targets_carry_stable_ids():
+    """Every target has a stable id used for included/excluded reporting; ids
+    are unique across the whole expanded deck."""
+    full = targetdeck.load_expanded_targets()
+    assert all(t.id for t in full)
+    ids = [t.id for t in full]
+    assert len(ids) == len(set(ids)), "target ids must be unique"
+    # a silo id looks like "90MW-A-01"; an HVT id is an "hvt-" slug
+    assert any(t.id.endswith("-01") for t in full if t.category == "icbm_lf")
+    assert any(t.id.startswith("hvt-") for t in full if t.category == "city_population")
 
 
 def _model(gz_lat, gz_lon):
