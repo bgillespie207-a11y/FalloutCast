@@ -113,6 +113,40 @@ def test_missing_member_value_falls_back_to_control():
     assert member2.speed_ms[idx_925] == 10.0  # control's value, not NaN/crash
 
 
+# --- fetch_profile hour selection --------------------------------------------
+
+
+def _gfs_day_payload():
+    """A full 24-hour GFS response where the 1000 hPa wind at hour 14 is wildly
+    different from hour 0, so a test can prove which hour was selected."""
+    times = [f"2026-07-13T{h:02d}:00" for h in range(24)]
+    hourly = {"time": times}
+    for hpa, h in zip(LEVELS, HEIGHTS):
+        speed = [1.0] * 24
+        direction = [90.0] * 24
+        if hpa == 1000:
+            speed[14] = 99.0            # the "current hour" value
+            direction[14] = 270.0
+        hourly[f"windspeed_{hpa}hPa"] = speed
+        hourly[f"winddirection_{hpa}hPa"] = direction
+        hourly[f"geopotential_height_{hpa}hPa"] = [float(h)] * 24
+    return {"hourly": hourly}
+
+
+def test_fetch_profile_selects_requested_hour_not_index_zero():
+    """Multi-hour fixture: fetch_profile must read the requested valid hour, not
+    index 0 (= midnight). Under the old idx=0 bug the 1000 hPa speed would be
+    1.0; selecting hour 14 must yield 99.0, and valid_time must be recorded."""
+    client = _FakeClient(_gfs_day_payload())
+    profile = asyncio.run(
+        openmeteo.fetch_profile(41.14, -104.82, valid_time="2026-07-13T14:00", client=client)
+    )
+    # 1000 hPa is the lowest level -> first entry after height-sort (110 m).
+    assert profile.speed_ms[0] == 99.0
+    assert profile.valid_time == "2026-07-13T14:00"
+    assert profile.retrieved_at > 0.0
+
+
 # --- cached_fetch_profile ----------------------------------------------------
 
 
@@ -125,20 +159,20 @@ def _fake_profile():
 
 
 def test_cached_fetch_profile_serves_repeat_calls_from_cache(monkeypatch):
-    """A second call for the same point in the same window makes no network
-    call -- this is what makes repeat envelope requests near-instant."""
+    """A second call for the same point + valid hour makes no network call --
+    this is what makes repeat envelope requests near-instant."""
     openmeteo.clear_profile_cache()
     calls = {"n": 0}
 
-    async def fake(lat, lon, *, client=None):
+    async def fake(lat, lon, *, valid_time=None, client=None):
         calls["n"] += 1
         return _fake_profile()
 
     monkeypatch.setattr(openmeteo, "fetch_profile", fake)
 
     async def run():
-        a = await openmeteo.cached_fetch_profile(41.1, -104.8)
-        b = await openmeteo.cached_fetch_profile(41.1, -104.8)
+        a = await openmeteo.cached_fetch_profile(41.1, -104.8, valid_time="2026-07-13T14:00")
+        b = await openmeteo.cached_fetch_profile(41.1, -104.8, valid_time="2026-07-13T14:00")
         return a, b
 
     a, b = asyncio.run(run())
@@ -153,7 +187,7 @@ def test_cached_fetch_profile_dedupes_concurrent_misses(monkeypatch):
     openmeteo.clear_profile_cache()
     calls = {"n": 0}
 
-    async def fake(lat, lon, *, client=None):
+    async def fake(lat, lon, *, valid_time=None, client=None):
         calls["n"] += 1
         await asyncio.sleep(0.02)  # hold the fetch open so both calls overlap
         return _fake_profile()
@@ -162,8 +196,8 @@ def test_cached_fetch_profile_dedupes_concurrent_misses(monkeypatch):
 
     async def run():
         return await asyncio.gather(
-            openmeteo.cached_fetch_profile(30.0, -90.0),
-            openmeteo.cached_fetch_profile(30.0, -90.0),
+            openmeteo.cached_fetch_profile(30.0, -90.0, valid_time="2026-07-13T14:00"),
+            openmeteo.cached_fetch_profile(30.0, -90.0, valid_time="2026-07-13T14:00"),
         )
 
     res = asyncio.run(run())
@@ -172,23 +206,39 @@ def test_cached_fetch_profile_dedupes_concurrent_misses(monkeypatch):
     openmeteo.clear_profile_cache()
 
 
-def test_cached_fetch_profile_refetches_after_window_rolls(monkeypatch):
-    """A short TTL window that elapses between calls forces a refetch -- the
-    cache is time-bounded, not sticky forever."""
+def test_cached_fetch_profile_refetches_for_a_new_valid_hour(monkeypatch):
+    """The cache is keyed to the forecast valid hour, not a wall-clock TTL: the
+    same point at a DIFFERENT valid_time is a distinct entry and refetches, so a
+    rolled-over forecast hour is never served stale from cache."""
     openmeteo.clear_profile_cache()
     calls = {"n": 0}
 
-    async def fake(lat, lon, *, client=None):
+    async def fake(lat, lon, *, valid_time=None, client=None):
         calls["n"] += 1
         return _fake_profile()
 
     monkeypatch.setattr(openmeteo, "fetch_profile", fake)
 
     async def run():
-        await openmeteo.cached_fetch_profile(45.0, -100.0, ttl_s=0.05)
-        await asyncio.sleep(0.06)
-        await openmeteo.cached_fetch_profile(45.0, -100.0, ttl_s=0.05)
+        await openmeteo.cached_fetch_profile(45.0, -100.0, valid_time="2026-07-13T14:00")
+        await openmeteo.cached_fetch_profile(45.0, -100.0, valid_time="2026-07-13T15:00")
 
     asyncio.run(run())
     assert calls["n"] == 2
     openmeteo.clear_profile_cache()
+
+
+def test_select_hour_index_picks_current_hour_not_index_zero():
+    """The core weather-hour fix: given a full day of hourly timestamps, the
+    selector must NOT return index 0 (00:00 UTC) for a mid-day 'now' -- it must
+    return the index whose timestamp is nearest the target hour. A multi-hour
+    fixture that would fail under the old idx=0 behavior."""
+    times = [f"2026-07-13T{h:02d}:00" for h in range(24)]
+    # explicit valid_time -> exact index
+    idx, sel = openmeteo._select_hour_index(times, "2026-07-13T14:00")
+    assert idx == 14 and sel == "2026-07-13T14:00"
+    # nearest-to-target when the exact string isn't present
+    idx2, sel2 = openmeteo._select_hour_index(times, "2026-07-13T14:29")
+    assert idx2 == 14
+    # empty -> safe fallback
+    assert openmeteo._select_hour_index([], None) == (0, "")

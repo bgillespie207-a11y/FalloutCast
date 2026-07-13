@@ -17,7 +17,9 @@ POST /exchange/envelope    true national max-envelope dose surface (PRD.md M2):
 from __future__ import annotations
 
 import asyncio
+import time as _time
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -333,8 +335,8 @@ _WIND_FETCH_CONCURRENCY = 8
 
 
 async def _build_models_bucketed(
-    tgts: list[Target], yield_fn
-) -> tuple[list[tuple[WSEG10, float, float]], list[str]]:
+    tgts: list[Target], yield_fn, *, valid_time: str | None = None
+) -> tuple[list[tuple[WSEG10, float, float]], list[str], dict]:
     """Build one WSEG-10 model per target, sharing a single fetched wind
     *profile* across all targets in the same ~1-degree bucket. Returns
     (models, failed_names).
@@ -351,6 +353,10 @@ async def _build_models_bucketed(
     the response can report them. Fetches run concurrently under a small
     semaphore.
     """
+    # One valid forecast hour chosen up front, shared by every bucket/target,
+    # so the whole envelope uses a single consistent 'current weather' hour.
+    vt = valid_time or openmeteo.current_valid_time()
+
     buckets: dict[tuple[int, int], list[Target]] = defaultdict(list)
     for t in tgts:
         buckets[(round(t.lat / _WIND_BUCKET_DEG), round(t.lon / _WIND_BUCKET_DEG))].append(t)
@@ -370,10 +376,9 @@ async def _build_models_bucketed(
         for attempt in range(2):
             try:
                 async with sem:
-                    # Cached wrapper: repeat/concurrent envelope calls reuse the
-                    # same per-bucket profile within the met window instead of
-                    # re-hitting Open-Meteo every time.
-                    return await openmeteo.cached_fetch_profile(rlat, rlon)
+                    # Cached wrapper (keyed to the shared valid hour): repeat/
+                    # concurrent envelope calls reuse the per-bucket profile.
+                    return await openmeteo.cached_fetch_profile(rlat, rlon, valid_time=vt)
             except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
                 last_exc = exc
                 if attempt == 0:
@@ -386,12 +391,18 @@ async def _build_models_bucketed(
 
     models: list[tuple[WSEG10, float, float]] = []
     failed: list[str] = []
+    oldest_retrieved = 0.0
     for k, res in zip(keys, results):
         members = buckets[k]
         if isinstance(res, Exception):
             failed.extend(m.name for m in members)
             continue
         profile = res
+        if profile.retrieved_at:
+            oldest_retrieved = (
+                profile.retrieved_at if oldest_retrieved == 0.0
+                else min(oldest_retrieved, profile.retrieved_at)
+            )
         for t in members:
             y_mt, ff = yield_fn(t)
             eff = openmeteo.reduce_profile(profile, cloud_top_height_m(y_mt))
@@ -401,7 +412,24 @@ async def _build_models_bucketed(
                 shear_mph_per_kft=eff.shear_mph_per_kft,
             )
             models.append((model, t.lat, t.lon))
-    return models, failed
+
+    provenance = _weather_provenance(vt, oldest_retrieved)
+    return models, failed, provenance
+
+
+def _weather_provenance(valid_time: str, retrieved_at: float) -> dict:
+    """Structured weather provenance for API/UI/export: which forecast hour the
+    winds are for, the model, when they were retrieved, and how stale that is."""
+    now = _time.time()
+    return {
+        "valid_time": valid_time,
+        "model": openmeteo.MODEL_NAME,
+        "retrieved_at": (
+            datetime.fromtimestamp(retrieved_at, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if retrieved_at else None
+        ),
+        "age_seconds": int(now - retrieved_at) if retrieved_at else None,
+    }
 
 
 @app.post("/exchange/envelope", response_model=ExchangeEnvelopeResponse)
@@ -446,7 +474,7 @@ async def exchange_envelope(
     else:
         yield_fn = lambda t: (yield_mt, fission_fraction)  # noqa: E731
 
-    models, failed = await _build_models_bucketed(tgts, yield_fn)
+    models, failed, weather = await _build_models_bucketed(tgts, yield_fn)
     if not models:
         raise HTTPException(status_code=502, detail="wind fetch failed for all targets")
 
@@ -479,10 +507,14 @@ async def exchange_envelope(
     if failed:
         shown = ", ".join(failed[:5]) + (f", +{len(failed) - 5} more" if len(failed) > 5 else "")
         notes.append(f"Excluded {len(failed)} target(s) with failed wind fetch: {shown}.")
+    notes.append(
+        f"Winds valid {weather['valid_time']}Z from {weather['model']}"
+        + (f", retrieved {weather['retrieved_at']}." if weather["retrieved_at"] else ".")
+    )
 
     # Reported yield: the uniform value, or the class span when per-class.
     reported_yield = 0.0 if per_class else yield_mt
     return ExchangeEnvelopeResponse(
         yield_mt=reported_yield, fission_fraction=fission_fraction, n_targets=len(models),
-        disclaimer=DISCLAIMER, notes=notes, contours=gj,
+        disclaimer=DISCLAIMER, notes=notes, contours=gj, weather=weather,
     )

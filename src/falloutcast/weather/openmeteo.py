@@ -16,11 +16,15 @@ the API layer can also accept a hand-specified wind to bypass the network.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import numpy as np
 
 from ..physics import units
+
+# Human-readable model identity for provenance in API/UI/export.
+MODEL_NAME = "GFS (Open-Meteo gfs_seamless)"
 
 GFS_ENDPOINT = "https://api.open-meteo.com/v1/gfs"
 ENSEMBLE_ENDPOINT = "https://ensemble-api.open-meteo.com/v1/ensemble"
@@ -51,6 +55,49 @@ class WindProfile:
     height_m: np.ndarray
     speed_ms: np.ndarray
     direction_deg: np.ndarray  # meteorological "from" direction
+    # Provenance: which forecast hour this profile is actually FOR (ISO UTC,
+    # "YYYY-MM-DDTHH:MM"), and when it was retrieved (unix seconds). Defaulted
+    # so hand-built profiles (tests, validation/reference_cases) still work.
+    valid_time: str = ""
+    retrieved_at: float = 0.0
+
+
+def current_valid_time() -> str:
+    """The forecast hour to use for 'now': the current UTC time floored to the
+    hour, in Open-Meteo's hourly-time format. Callers pass this to every fetch
+    in one computation so all targets share a single valid time."""
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    return now.strftime("%Y-%m-%dT%H:%M")
+
+
+def _parse_iso_hour(s: str) -> datetime:
+    # Open-Meteo hourly.time entries look like "2026-07-13T14:00" (UTC/GMT).
+    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+
+
+def _hourly_at(hourly: dict, key: str, idx: int):
+    """Value of an hourly variable at `idx`, or None if the variable is absent
+    or shorter than idx. Absent levels used to be safe only because idx was
+    always 0; with real hour selection they must be guarded explicitly."""
+    arr = hourly.get(key)
+    if not arr or idx >= len(arr):
+        return None
+    return arr[idx]
+
+
+def _select_hour_index(times: list[str], valid_time: str | None) -> tuple[int, str]:
+    """Pick the hourly index for `valid_time` (exact match, else nearest), or
+    the nearest hour to 'now' when `valid_time` is None. Returns (index,
+    selected_iso). This is the fix for the long-standing idx=0 bug: index 0 is
+    00:00 UTC of the forecast day, NOT the current hour."""
+    if not times:
+        return 0, ""
+    if valid_time and valid_time in times:
+        return times.index(valid_time), valid_time
+    target = _parse_iso_hour(valid_time) if valid_time else datetime.now(timezone.utc)
+    parsed = [_parse_iso_hour(t) for t in times]
+    idx = min(range(len(parsed)), key=lambda i: abs((parsed[i] - target).total_seconds()))
+    return idx, times[idx]
 
 
 @dataclass
@@ -116,8 +163,15 @@ def profile_uv(profile: WindProfile):
     return profile.height_m, u, v
 
 
-async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
-    """Fetch the current wind profile from Open-Meteo GFS.
+async def fetch_profile(
+    lat: float, lon: float, *, valid_time: str | None = None, client=None
+) -> WindProfile:
+    """Fetch the wind profile for a given forecast hour from Open-Meteo GFS.
+
+    `valid_time` selects which hour to use (ISO "YYYY-MM-DDTHH:MM"); when None,
+    the hour nearest to 'now' is chosen. This is deliberate: Open-Meteo's
+    `forecast_days` hourly data starts at 00:00 UTC, so blindly taking index 0
+    yields midnight weather, not current weather.
 
     `client` is an optional httpx.AsyncClient (injectable for tests). If not
     given, one is created for the call.
@@ -136,6 +190,7 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
         "longitude": lon,
         "hourly": ",".join(hourly_vars),
         "wind_speed_unit": "ms",
+        "timezone": "GMT",   # hourly.time entries are then UTC, matching valid_time
         "forecast_days": 1,
     }
 
@@ -151,13 +206,13 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
             await client.aclose()
 
     hourly = data["hourly"]
-    idx = 0  # current hour
+    idx, selected = _select_hour_index(hourly.get("time", []), valid_time)
 
     heights, speeds, dirs = [], [], []
     for hpa, std_h in zip(_STD_LEVELS_HPA, _STD_HEIGHTS_M):
-        sp = hourly.get(f"windspeed_{hpa}hPa", [None])[idx]
-        dr = hourly.get(f"winddirection_{hpa}hPa", [None])[idx]
-        gh = hourly.get(f"geopotential_height_{hpa}hPa", [None])[idx]
+        sp = _hourly_at(hourly, f"windspeed_{hpa}hPa", idx)
+        dr = _hourly_at(hourly, f"winddirection_{hpa}hPa", idx)
+        gh = _hourly_at(hourly, f"geopotential_height_{hpa}hPa", idx)
         if sp is None or dr is None:
             continue
         heights.append(gh if gh is not None else std_h)
@@ -169,6 +224,8 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
         height_m=np.asarray(heights)[order],
         speed_ms=np.asarray(speeds)[order],
         direction_deg=np.asarray(dirs)[order],
+        valid_time=selected,
+        retrieved_at=_time.time(),
     )
 
 
@@ -177,12 +234,12 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
 # cached wrapper for callers that fetch the same points repeatedly -- notably
 # the exchange envelope, which re-fetches every target/bucket on every request.
 #
-# Keying: the cache key folds in a wall-clock time window (default 1 h) so an
-# entry naturally expires roughly on the model's refresh cadence. This is a
-# pragmatic stand-in for keying to the actual GFS run id (which the endpoint
-# doesn't cleanly expose): fetch_profile reads the *current-hour* forecast, so
-# a 1 h window matches what actually changes between reads. GFS refreshes
-# ~4x/day and HRRR hourly, so nothing served is more than ~1 h stale.
+# Keying: the cache key includes the forecast VALID TIME (the model hour being
+# served). When that hour rolls over, the key changes and the entry is naturally
+# refetched -- so nothing stale is ever served, and the invalidation tracks the
+# forecast rather than an arbitrary wall clock. (Open-Meteo doesn't cleanly
+# expose the GFS run id; the valid hour is the meaningful generation marker we
+# have.)
 #
 # In-flight de-duplication means concurrent requests for the same key share a
 # single network call (no thundering herd) rather than all missing at once.
@@ -191,15 +248,16 @@ async def fetch_profile(lat: float, lon: float, *, client=None) -> WindProfile:
 import asyncio as _asyncio
 import time as _time
 
-_PROFILE_TTL_S = 3600.0
 _PROFILE_CACHE: dict[tuple, WindProfile] = {}
 _PROFILE_INFLIGHT: dict[tuple, "_asyncio.Future[WindProfile]"] = {}
 
 
-def _profile_key(lat: float, lon: float, ttl_s: float) -> tuple:
+def _profile_key(lat: float, lon: float, valid_time: str) -> tuple:
     # round to ~0.1 deg (bucket reps are ~1 deg apart, so this never collides
-    # distinct buckets) and bucket the clock into ttl-wide windows.
-    return (round(lat, 1), round(lon, 1), int(_time.time() // ttl_s))
+    # distinct buckets); key on the forecast VALID TIME (the model hour) rather
+    # than a wall-clock TTL window, so the cache naturally invalidates when the
+    # forecast hour we're serving changes -- not on an arbitrary clock boundary.
+    return (round(lat, 1), round(lon, 1), valid_time)
 
 
 def clear_profile_cache() -> None:
@@ -209,15 +267,18 @@ def clear_profile_cache() -> None:
 
 
 async def cached_fetch_profile(
-    lat: float, lon: float, *, ttl_s: float = _PROFILE_TTL_S, client=None
+    lat: float, lon: float, *, valid_time: str | None = None, client=None
 ) -> WindProfile:
-    """`fetch_profile` with a single-process TTL cache + in-flight de-dup.
+    """`fetch_profile` with a single-process cache keyed to the forecast valid
+    hour + in-flight de-dup.
 
-    Repeat calls for the same point within the same time window return the
-    cached profile with no network call; concurrent misses for the same key
-    await one shared fetch.
+    Repeat calls for the same point/valid-hour return the cached profile with no
+    network call; concurrent misses for the same key await one shared fetch.
+    Pass an explicit `valid_time` so every target in one computation shares a
+    single forecast hour (and a single cache generation).
     """
-    key = _profile_key(lat, lon, ttl_s)
+    vt = valid_time or current_valid_time()
+    key = _profile_key(lat, lon, vt)
     cached = _PROFILE_CACHE.get(key)
     if cached is not None:
         return cached
@@ -230,15 +291,13 @@ async def cached_fetch_profile(
     fut: "_asyncio.Future[WindProfile]" = loop.create_future()
     _PROFILE_INFLIGHT[key] = fut
     try:
-        profile = await fetch_profile(lat, lon, client=client)
+        profile = await fetch_profile(lat, lon, valid_time=vt, client=client)
     except Exception as exc:
         fut.set_exception(exc)
         _PROFILE_INFLIGHT.pop(key, None)
         raise
-    # prune entries from older time windows so the dict can't grow unbounded
-    # over a long-running process.
-    current_window = key[2]
-    for k in [k for k in _PROFILE_CACHE if k[2] != current_window]:
+    # prune entries for other valid hours so the dict can't grow unbounded.
+    for k in [k for k in _PROFILE_CACHE if k[2] != vt]:
         _PROFILE_CACHE.pop(k, None)
     _PROFILE_CACHE[key] = profile
     _PROFILE_INFLIGHT.pop(key, None)
@@ -247,7 +306,8 @@ async def cached_fetch_profile(
 
 
 async def fetch_ensemble_profiles(
-    lat: float, lon: float, *, n_members: int = ENSEMBLE_MEMBERS_AVAILABLE, client=None
+    lat: float, lon: float, *, n_members: int = ENSEMBLE_MEMBERS_AVAILABLE,
+    valid_time: str | None = None, client=None
 ) -> list[WindProfile]:
     """Fetch real Open-Meteo GFS-ensemble wind profiles, one per member.
 
@@ -289,6 +349,7 @@ async def fetch_ensemble_profiles(
         "hourly": ",".join(hourly_vars),
         "models": ENSEMBLE_MODEL,
         "wind_speed_unit": "ms",
+        "timezone": "GMT",
         "forecast_days": 1,
     }
 
@@ -304,17 +365,19 @@ async def fetch_ensemble_profiles(
             await client.aclose()
 
     hourly = data["hourly"]
-    idx = 0  # current hour
+    # Select the current (or requested) forecast hour, NOT index 0 (= 00:00 UTC).
+    idx, selected = _select_hour_index(hourly.get("time", []), valid_time)
+    retrieved = _time.time()
 
     # Levels present for the CONTROL member define the shared height axis
     # every member's arrays get aligned to (see docstring).
     levels = []
     for hpa, std_h in zip(_STD_LEVELS_HPA, _STD_HEIGHTS_M):
-        sp = hourly.get(f"windspeed_{hpa}hPa", [None])[idx]
-        dr = hourly.get(f"winddirection_{hpa}hPa", [None])[idx]
+        sp = _hourly_at(hourly, f"windspeed_{hpa}hPa", idx)
+        dr = _hourly_at(hourly, f"winddirection_{hpa}hPa", idx)
         if sp is None or dr is None:
             continue
-        gh = hourly.get(f"geopotential_height_{hpa}hPa", [None])[idx]
+        gh = _hourly_at(hourly, f"geopotential_height_{hpa}hPa", idx)
         levels.append((hpa, gh if gh is not None else std_h, sp, dr))
 
     heights = np.asarray([h for _, h, _, _ in levels], dtype=float)
@@ -324,8 +387,8 @@ async def fetch_ensemble_profiles(
     for suffix in member_suffixes:
         speeds, dirs = [], []
         for hpa, _h, control_sp, control_dr in levels:
-            sp = hourly.get(f"windspeed_{hpa}hPa{suffix}", [None])[idx]
-            dr = hourly.get(f"winddirection_{hpa}hPa{suffix}", [None])[idx]
+            sp = _hourly_at(hourly, f"windspeed_{hpa}hPa{suffix}", idx)
+            dr = _hourly_at(hourly, f"winddirection_{hpa}hPa{suffix}", idx)
             speeds.append(control_sp if sp is None else sp)
             dirs.append(control_dr if dr is None else dr)
         profiles.append(
@@ -333,6 +396,8 @@ async def fetch_ensemble_profiles(
                 height_m=heights[order],
                 speed_ms=np.asarray(speeds, dtype=float)[order],
                 direction_deg=np.asarray(dirs, dtype=float)[order],
+                valid_time=selected,
+                retrieved_at=retrieved,
             )
         )
     return profiles

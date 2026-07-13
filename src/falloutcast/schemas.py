@@ -95,6 +95,16 @@ class EnsembleResponse(BaseModel):
     contours: dict  # probability bands: P(dose rate >= level_rhr)
 
 
+class WeatherProvenance(BaseModel):
+    """Which forecast the winds came from -- so 'current weather' is auditable
+    (fixes the long-standing bug where index 0 = 00:00 UTC was used)."""
+
+    valid_time: str                       # forecast hour used, ISO UTC
+    model: str                            # e.g. "GFS (Open-Meteo gfs_seamless)"
+    retrieved_at: Optional[str] = None    # when the winds were fetched, ISO UTC
+    age_seconds: Optional[int] = None     # staleness of the (possibly cached) winds
+
+
 class ExchangeEnvelopeResponse(BaseModel):
     """True national max-envelope dose surface (PRD.md M2) -- one composite
     grid/contour set across all targets, not a per-target overlay (contrast
@@ -105,6 +115,7 @@ class ExchangeEnvelopeResponse(BaseModel):
     n_targets: int
     disclaimer: str
     notes: list[str] = []
+    weather: Optional[WeatherProvenance] = None
     contours: dict  # one FeatureCollection: max H+1 dose rate from ANY target
 
 

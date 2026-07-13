@@ -59,12 +59,20 @@ export interface ExchangeEnvelopeRequest {
   fission_fraction: number;
 }
 
+export interface WeatherProvenance {
+  valid_time: string;
+  model: string;
+  retrieved_at: string | null;
+  age_seconds: number | null;
+}
+
 export interface ExchangeEnvelopeResponse {
   yield_mt: number;
   fission_fraction: number;
   n_targets: number;
   disclaimer: string;
   notes: string[];
+  weather?: WeatherProvenance | null;
   contours: GeoJsonFeatureCollection;
 }
 

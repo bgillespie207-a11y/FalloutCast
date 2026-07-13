@@ -458,10 +458,13 @@ async function computeExchangeEnvelope(): Promise<void> {
     map.flyTo({ center: [-98.5, 39.8], zoom: 3.3 });
 
     writeUrlState({ mode: "exchange" });
-    statusEl.textContent = `Envelope computed across ${resp.n_targets} target(s).`;
+    const validHour = resp.weather ? ` · winds valid ${resp.weather.valid_time}Z` : "";
+    statusEl.textContent = `Envelope computed across ${resp.n_targets} target(s).${validHour}`;
     renderPlainNotes(resp.notes);
     renderStaticContours(resp.contours);
-    exportGeoJson = resp.contours;
+    // Carry weather provenance into the export so a downloaded envelope records
+    // which forecast hour produced it.
+    exportGeoJson = { ...resp.contours, weather: resp.weather ?? undefined } as GeoJsonFeatureCollection;
     exportBtn.hidden = false;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
