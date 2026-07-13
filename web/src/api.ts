@@ -82,6 +82,7 @@ export interface YieldPolicy {
 export interface ExchangeEnvelopeResponse {
   n_targets: number;
   aggregation: Aggregation;
+  deck_version: string;
   yield_policy: YieldPolicy;
   included_target_ids: string[];
   excluded_target_ids: string[];
@@ -109,6 +110,37 @@ export interface EnsembleResponse {
   notes: string[];
   // contour features carry { exceedance_probability: 0.1 | 0.5 | 0.9 }
   contours: GeoJsonFeatureCollection;
+}
+
+export interface FieldPolygon {
+  id: string;
+  wing: string;
+  base: string;
+  lf_count: number;
+  lcc_count: number;
+  geography_mode: string;
+  confidence: string;
+  source: string;
+  pub_date: string;
+  verify_date: string;
+  polygon: number[][]; // closed ring of [lon, lat]
+}
+
+export interface TargetDeckMeta {
+  version: string;
+  content_hash: string;
+  generated: string;
+  n_targets: number;
+  n_synthetic: number;
+  fields: FieldPolygon[];
+  notes: string[];
+}
+
+export function fetchDeck(): Promise<TargetDeckMeta> {
+  return fetch(`${__API_URL__}/deck`).then((resp) => {
+    if (!resp.ok) throw new ApiError(`/deck -> HTTP ${resp.status}`);
+    return resp.json() as Promise<TargetDeckMeta>;
+  });
 }
 
 export interface ZipLocation {

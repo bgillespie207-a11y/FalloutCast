@@ -41,6 +41,14 @@ def load_targets(path: Path | None = None) -> list[Target]:
                 lon=lon,
                 category=props.get("category", "unknown"),
                 note=props.get("note", ""),
+                site_type=props.get("category", "unknown"),
+                accuracy_m=2000.0,           # approximate installation centroid
+                confidence="medium",
+                geography_mode="observed",
+                source="public/open (data/targets_conus.geojson)",
+                pub_date=gj.get("meta", {}).get("source", "public/open"),
+                verify_date="2026-07-13",
+                status="curated public installation set",
             )
         )
     return out

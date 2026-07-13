@@ -44,11 +44,33 @@ opt-in via `load_expanded_targets()`.
 
 from __future__ import annotations
 
+import hashlib
 import random
 from dataclasses import dataclass
 
-from .schemas import Target
+from .schemas import FieldPolygon, Target, TargetDeckMeta
 from .targets import load_targets
+
+# --- versioned dataset metadata ----------------------------------------------
+# This is a VERSIONED dataset, not a one-off: silo geography is expected to be
+# refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
+# facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
+DATASET_VERSION = "2025.1-synthetic"
+VERIFY_DATE = "2026-07-13"
+
+# Provenance for what IS asserted about the fields: the COUNT and ORGANIZATION,
+# not the individual coordinates.
+_STRUCTURE_SOURCE = (
+    "GAO 2025 (450 Minuteman III silos; 400 deployed ICBMs) + USAF wing "
+    "descriptions (3 squadrons x 5 flights x (10 LF + 1 MAF/LCC) per wing). "
+    "COUNT and ORGANIZATION only -- individual facility coordinates are NOT "
+    "publicly sourced here."
+)
+_STRUCTURE_PUB_DATE = "2025"
+# Field-scale positional uncertainty for a synthetic point placed somewhere in a
+# ~1-2 degree field: order tens of km. Deliberately large -- these are not
+# survey coordinates.
+_SYNTHETIC_ACCURACY_M = 30000.0
 
 # --- Minuteman III wing footprints (public, documented) ----------------------
 # Each footprint is an approximate geographic bounding box of the wing's
@@ -129,19 +151,36 @@ def generate_wing(wing: Wing) -> list[Target]:
     """
     rng = random.Random(wing.seed)
     wing_slug = wing.name.replace(" ", "")  # e.g. "90MW"
+
+    def _synthetic(**kw) -> Target:
+        # shared provenance for every synthetic field point.
+        return Target(
+            wing=wing.name,
+            accuracy_m=_SYNTHETIC_ACCURACY_M,
+            confidence="low",
+            geography_mode="synthetic",
+            source=_STRUCTURE_SOURCE,
+            pub_date=_STRUCTURE_PUB_DATE,
+            verify_date=VERIFY_DATE,
+            status="documented active wing; individual facility status not asserted",
+            **kw,
+        )
+
     out: list[Target] = []
     for f_idx, (clon, clat) in enumerate(_flight_centers(wing, rng), start=1):
         squadron = (f_idx - 1) // FLIGHTS_PER_SQUADRON + 1
         flight_letter = chr(ord("A") + (f_idx - 1))
         # One LCC (missile alert facility) at the flight center.
         out.append(
-            Target(
+            _synthetic(
                 id=f"{wing_slug}-{flight_letter}-LCC",
                 name=f"{wing.name} {flight_letter}-01 LCC",
                 lat=round(clat, 4),
                 lon=round(clon, 4),
                 category="icbm_lcc",
-                note=f"{wing.base} launch control center (illustrative)",
+                site_type="launch_control_center",
+                designator=f"{flight_letter}-01",
+                note=f"{wing.base} launch control center (SYNTHETIC position)",
             )
         )
         # Ten LFs scattered around the flight center.
@@ -152,13 +191,15 @@ def generate_wing(wing: Wing) -> list[Target]:
             lon = min(max(lon, wing.lon_min), wing.lon_max)
             lat = min(max(lat, wing.lat_min), wing.lat_max)
             out.append(
-                Target(
+                _synthetic(
                     id=f"{wing_slug}-{flight_letter}-{lf:02d}",
                     name=f"{wing.name} {flight_letter}-{lf:02d}",
                     lat=round(lat, 4),
                     lon=round(lon, 4),
                     category="icbm_lf",
-                    note=f"squadron {squadron}, flight {flight_letter} (illustrative silo)",
+                    site_type="launch_facility",
+                    designator=f"{flight_letter}-{lf:02d}",
+                    note=f"squadron {squadron}, flight {flight_letter} (SYNTHETIC silo position)",
                 )
             )
     return out
@@ -239,8 +280,15 @@ def _slug(name: str) -> str:
 
 
 def high_value_targets() -> list[Target]:
+    # City centers etc. are ordinary public geography (observed, ~1 km accuracy).
     return [
-        Target(id=_slug(n), name=n, lat=lat, lon=lon, category=cat, note=note)
+        Target(
+            id=_slug(n), name=n, lat=lat, lon=lon, category=cat, note=note,
+            site_type=cat, accuracy_m=1000.0, confidence="high",
+            geography_mode="observed", source="public geography (city/site centroid)",
+            pub_date="n/a", verify_date=VERIFY_DATE,
+            status="curated, incomplete selection",
+        )
         for (n, lon, lat, cat, note) in _HVT
     ]
 
@@ -266,3 +314,73 @@ def load_expanded_targets() -> list[Target]:
     """
     installations = [t for t in load_targets() if t.category != _SUPERSEDED]
     return installations + generate_all_fields() + high_value_targets()
+
+
+def verified_targets() -> list[Target]:
+    """Targets whose geography is NOT synthetic (observed/field_polygon only).
+    The synthetic silo/LCC points are excluded -- there are no verified precise
+    facility coordinates to stand behind."""
+    return [t for t in load_expanded_targets() if t.geography_mode != "synthetic"]
+
+
+# --- field polygons: the verifiable geography --------------------------------
+# When individual facility coordinates can't be sourced to precision, the
+# HONEST geography is the documented field FOOTPRINT. Each wing's footprint is
+# rendered as a rectangle from its documented bounding box -- the extent is
+# public knowledge even though the ~165 points inside it are synthetic.
+
+def field_polygon(wing: Wing) -> FieldPolygon:
+    ring = [
+        [wing.lon_min, wing.lat_min],
+        [wing.lon_max, wing.lat_min],
+        [wing.lon_max, wing.lat_max],
+        [wing.lon_min, wing.lat_max],
+        [wing.lon_min, wing.lat_min],  # closed
+    ]
+    return FieldPolygon(
+        id=f"field-{wing.name.replace(' ', '')}",
+        wing=wing.name,
+        base=wing.base,
+        lf_count=LF_PER_WING,
+        lcc_count=LCC_PER_WING,
+        confidence="medium",  # footprint documented; exact boundary approximate
+        source=_STRUCTURE_SOURCE,
+        pub_date=_STRUCTURE_PUB_DATE,
+        verify_date=VERIFY_DATE,
+        polygon=ring,
+    )
+
+
+def field_polygons() -> list[FieldPolygon]:
+    return [field_polygon(w) for w in WINGS]
+
+
+def dataset_content_hash() -> str:
+    """Deterministic sha256 over the target set's identity + geography, so a
+    dataset change is detectable. Rounds coords to the stored precision."""
+    parts = []
+    for t in load_expanded_targets():
+        parts.append(f"{t.id}|{round(t.lat, 4)}|{round(t.lon, 4)}|{t.category}|{t.geography_mode}")
+    blob = "\n".join(sorted(parts)).encode()
+    return hashlib.sha256(blob).hexdigest()
+
+
+def deck_meta() -> TargetDeckMeta:
+    """Versioned dataset metadata + field polygons for provenance/export."""
+    targets = load_expanded_targets()
+    n_synth = sum(1 for t in targets if t.geography_mode == "synthetic")
+    return TargetDeckMeta(
+        version=DATASET_VERSION,
+        content_hash=dataset_content_hash(),
+        generated=VERIFY_DATE,
+        n_targets=len(targets),
+        n_synthetic=n_synth,
+        fields=field_polygons(),
+        notes=[
+            "Silo/LCC positions are SYNTHETIC (generated within documented field "
+            "footprints); their accuracy_m is field-scale and confidence is low. "
+            "The verifiable geography is the field polygons, not the points.",
+            "Versioned dataset: expected to be refined (USAF supplemental Sentinel "
+            "EIS, 2025). Bump DATASET_VERSION/VERIFY_DATE when data changes.",
+        ],
+    )

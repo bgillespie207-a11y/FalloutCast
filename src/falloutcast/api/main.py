@@ -39,6 +39,7 @@ from ..schemas import (
     PlumeRequest,
     PlumeResponse,
     Target,
+    TargetDeckMeta,
     WindUsed,
 )
 from ..weather import openmeteo
@@ -117,8 +118,16 @@ def health() -> dict:
     return {"status": "ok", "models": ["wseg10", "tier1"], "tiers": [0, 1]}
 
 
+@app.get("/deck", response_model=TargetDeckMeta)
+def get_deck() -> TargetDeckMeta:
+    """Versioned target-deck metadata: dataset version, content hash, and the
+    documented field FOOTPRINT polygons (the verifiable geography -- the
+    individual silo/LCC points are synthetic; see targetdeck.py)."""
+    return targetdeck.deck_meta()
+
+
 @app.get("/targets", response_model=list[Target])
-def get_targets(expanded: bool = False) -> list[Target]:
+def get_targets(expanded: bool = False, verified_only: bool = False) -> list[Target]:
     """Public target set.
 
     `expanded=false` (default): the 10 curated installations (unchanged).
@@ -127,7 +136,13 @@ def get_targets(expanded: bool = False) -> list[Target]:
     and control centers (illustrative distribution within the documented field
     footprints; see targetdeck.py) plus curated public high-value targets
     (population centers, industry, government C2).
+
+    `verified_only=true`: drop synthetic-geography points (silos/LCCs), leaving
+    only observed/field_polygon targets -- there are no verified precise facility
+    coordinates to stand behind.
     """
+    if verified_only:
+        return targetdeck.verified_targets()
     return targetdeck.load_expanded_targets() if expanded else targets_mod.load_targets()
 
 
@@ -539,6 +554,7 @@ async def exchange_envelope(
     return ExchangeEnvelopeResponse(
         n_targets=len(models),
         aggregation=aggregation,
+        deck_version=targetdeck.DATASET_VERSION,
         yield_policy=yield_policy,
         included_target_ids=[t.id for t in included],
         excluded_target_ids=[t.id for t in excluded],

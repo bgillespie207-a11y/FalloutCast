@@ -52,6 +52,47 @@ class Target(BaseModel):
     lon: float
     category: str
     note: str = ""
+    # --- provenance (versioned dataset; see targetdeck.py) -------------------
+    wing: Optional[str] = None
+    site_type: Optional[str] = None       # launch_facility | launch_control_center | city | ...
+    designator: Optional[str] = None      # public designator, if any
+    accuracy_m: Optional[float] = None    # positional accuracy, metres (large for synthetic)
+    confidence: Optional[str] = None      # high | medium | low
+    geography_mode: Optional[str] = None  # synthetic | observed | field_polygon
+    source: Optional[str] = None          # source doc/URL for what IS asserted
+    pub_date: Optional[str] = None        # source publication date
+    verify_date: Optional[str] = None     # when this record was last verified
+    status: Optional[str] = None          # facility status (NOT missile-loading, which is not public)
+
+
+class FieldPolygon(BaseModel):
+    """A documented missile-field FOOTPRINT (the verifiable geography when
+    individual facility coordinates cannot be sourced to precision)."""
+
+    id: str
+    wing: str
+    base: str
+    lf_count: int
+    lcc_count: int
+    geography_mode: str = "field_polygon"
+    confidence: str
+    source: str
+    pub_date: str
+    verify_date: str
+    # closed ring of [lon, lat] pairs
+    polygon: list[list[float]]
+
+
+class TargetDeckMeta(BaseModel):
+    """Versioned dataset metadata for provenance + change tracking."""
+
+    version: str
+    content_hash: str          # sha256 over the deterministic target set
+    generated: str             # ISO date this deck build was produced
+    n_targets: int
+    n_synthetic: int
+    fields: list[FieldPolygon] = []
+    notes: list[str] = []
 
 
 class DoseRequest(BaseModel):
@@ -116,6 +157,7 @@ class ExchangeEnvelopeResponse(BaseModel):
 
     n_targets: int
     aggregation: str                       # "max_single_source" or "sum"
+    deck_version: str = ""                 # versioned target-deck the run used
     yield_policy: dict                     # scenario/uniform yield assumptions (see scenario.py)
     included_target_ids: list[str] = []    # targets that contributed
     excluded_target_ids: list[str] = []    # targets dropped (e.g. wind-fetch failure)

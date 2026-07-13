@@ -5,11 +5,13 @@ import {
   fetchExchangeEnvelope,
   fetchEnsemble,
   fetchTargets,
+  fetchDeck,
   geocodeZip,
   ApiError,
   type ManualWind,
   type PlumeResponse,
   type GeoJsonFeatureCollection,
+  type TargetDeckMeta,
 } from "./api";
 import { fetchLevelSet, levelsForTime, TIME_MIN_HOURS, TIME_MAX_HOURS } from "./decay";
 
@@ -79,8 +81,10 @@ const TARGET_LABELS: Record<string, string> = {
 // flagged). If the basemap draws, the overlay draws.
 const CONTOUR_SOURCE = "fc-contours";
 const TARGET_SOURCE = "fc-targets";
+const FIELD_SOURCE = "fc-fields";
 const CONTOUR_LAYER = "fc-contour-lines";
 const TARGET_LAYER = "fc-target-circles";
+const FIELD_LAYER = "fc-field-outlines";
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
 function rgba(c: [number, number, number, number]): string {
@@ -185,8 +189,23 @@ map.getCanvas().addEventListener("webglcontextlost", () => {
 // installed -- compute paths await this before calling setData.
 const mapReady: Promise<void> = new Promise((resolve) => {
   map.on("load", () => {
+    map.addSource(FIELD_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
     map.addSource(TARGET_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
     map.addSource(CONTOUR_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+
+    // Documented field FOOTPRINTS (the verifiable geography). Dashed outline
+    // underneath the synthetic points, so it's clear the field extent is real
+    // even though the individual dots inside it are not.
+    map.addLayer({
+      id: FIELD_LAYER,
+      type: "line",
+      source: FIELD_SOURCE,
+      paint: {
+        "line-color": "rgba(120,120,130,0.9)",
+        "line-width": 1.5,
+        "line-dasharray": [3, 2],
+      },
+    });
 
     // Target dots below the contour lines. Small in pixels so a dense missile
     // field reads as a cluster of points, not a blob. Colored by category.
@@ -484,6 +503,7 @@ async function computeExchangeEnvelope(): Promise<void> {
     await ensureMapReady();
     const resp = await fetchExchangeEnvelope("max_single_source");
     disclaimerEl.textContent = resp.disclaimer;
+    await plotFieldPolygons();
     await plotTargetMarkers();
     map.flyTo({ center: [-98.5, 39.8], zoom: 3.3 });
 
@@ -493,12 +513,15 @@ async function computeExchangeEnvelope(): Promise<void> {
       `Max-single-source envelope across ${resp.n_targets} target(s).${validHour}`;
     renderPlainNotes(resp.notes);
     renderStaticContours(resp.contours);
-    // Carry the full provenance (weather, aggregation, yield policy, in/excluded
-    // targets) into the export -- not just anonymous contours.
+    renderSyntheticBadge();
+    // Carry the full provenance (weather, aggregation, yield policy, deck
+    // version/hash, in/excluded targets) into the export -- not just contours.
     exportGeoJson = {
       ...resp.contours,
       weather: resp.weather ?? undefined,
       aggregation: resp.aggregation,
+      deck_version: resp.deck_version,
+      deck_content_hash: deckMeta?.content_hash,
       yield_policy: resp.yield_policy,
       included_target_ids: resp.included_target_ids,
       excluded_target_ids: resp.excluded_target_ids,
@@ -644,6 +667,38 @@ async function plotTargetMarkers(): Promise<void> {
 
 function clearTargetMarkers(): void {
   targetSource().setData(EMPTY_FC as GeoJSON.FeatureCollection);
+  (map.getSource(FIELD_SOURCE) as maplibregl.GeoJSONSource).setData(EMPTY_FC as GeoJSON.FeatureCollection);
+}
+
+// The versioned deck metadata + documented field footprints. Kept so the
+// exchange export and the synthetic-geography badge can reference them.
+let deckMeta: TargetDeckMeta | null = null;
+
+async function plotFieldPolygons(): Promise<void> {
+  deckMeta = await fetchDeck();
+  const fc: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features: deckMeta.fields.map((f) => ({
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [f.polygon] },
+      properties: { wing: f.wing, lf: f.lf_count },
+    })),
+  };
+  (map.getSource(FIELD_SOURCE) as maplibregl.GeoJSONSource).setData(fc);
+}
+
+// A prominent, honest badge: the silo/LCC points are SYNTHETIC; the dashed
+// outlines are the documented (verifiable) field footprints.
+function renderSyntheticBadge(): void {
+  if (!deckMeta) return;
+  const badge = document.createElement("div");
+  badge.className = "geo-badge";
+  badge.innerHTML =
+    `⚠ <strong>${deckMeta.n_synthetic} silo/LCC positions are SYNTHETIC</strong> ` +
+    `(field-scale accuracy, low confidence). Dashed outlines are the documented ` +
+    `field footprints — the verifiable geography. Deck ${deckMeta.version}, ` +
+    `hash ${deckMeta.content_hash.slice(0, 8)}.`;
+  legendEl.appendChild(badge);
 }
 
 // Hover popups (native MapLibre replacement for deck.gl's getTooltip). One
