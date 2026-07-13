@@ -60,7 +60,7 @@ from .targets import load_targets
 # This is a VERSIONED dataset, not a one-off: silo geography is expected to be
 # refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
 # facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
-DATASET_VERSION = "2025.2-mapanchored"
+DATASET_VERSION = "2025.3-mapanchored"
 VERIFY_DATE = "2026-07-13"
 
 # Provenance. Flight ORGANIZATION and each flight's approximate geographic AREA
@@ -78,7 +78,9 @@ _STRUCTURE_SOURCE = (
     "documented flight areas / named towns on those maps; INDIVIDUAL launch-"
     "facility positions within each flight are scattered around the center and "
     "are NOT surveyed coordinates. Force structure (150 LF + 15 LCC per wing; "
-    "450 silos total) per GAO 2025."
+    "450 silos total) per GAO 2025. 90 MW flights Alpha and Echo corrected/"
+    "verified by a former 90 MW 13N missileer (2026); other flight letters are "
+    "approximate map readings, not individually verified."
 )
 _STRUCTURE_PUB_DATE = "public USAF site maps (historical/undated); count GAO 2025"
 # Flight-scale positional uncertainty: each point sits within its real flight
@@ -112,12 +114,16 @@ class Wing:
 
 
 # 90th MW -- F.E. Warren AFB: SE Wyoming + W Nebraska panhandle + NE Colorado.
+# Alpha and Echo positions corrected/verified by a former 90 MW 13N missileer
+# (2026): Alpha sits just north of I-80 just WEST of Pine Bluffs; Echo just EAST
+# of Pine Bluffs across the Nebraska line. Other flight letters are approximate
+# readings of the public site map, not individually verified.
 _WARREN_FLIGHTS: tuple[FlightAnchor, ...] = (
-    ("A", 41.18, -104.05),  # Pine Bluffs WY
+    ("A", 41.21, -104.15),  # just NW of Pine Bluffs, N of I-80 (13N-verified)
     ("B", 41.04, -104.32),  # Carpenter WY
     ("C", 41.42, -104.12),  # Albin WY
     ("D", 41.58, -104.15),  # Meriden / Hawk Springs WY
-    ("E", 41.76, -104.60),  # Chugwater WY
+    ("E", 41.20, -103.97),  # just E of Pine Bluffs across the NE line (13N-verified)
     ("F", 41.98, -104.35),  # Torrington WY area
     ("G", 41.24, -103.66),  # Kimball NE
     ("H", 41.32, -103.95),  # Bushnell NE
