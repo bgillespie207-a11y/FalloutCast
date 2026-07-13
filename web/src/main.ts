@@ -1,6 +1,4 @@
 import maplibregl from "maplibre-gl";
-import { MapboxOverlay } from "@deck.gl/mapbox";
-import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 
 import {
   fetchPlume,
@@ -12,7 +10,6 @@ import {
   type ManualWind,
   type PlumeResponse,
   type GeoJsonFeatureCollection,
-  type Target,
 } from "./api";
 import { fetchLevelSet, levelsForTime, TIME_MIN_HOURS, TIME_MAX_HOURS } from "./decay";
 
@@ -74,6 +71,45 @@ const TARGET_LABELS: Record<string, string> = {
   industry: "Industry / economic",
 };
 
+// --- native MapLibre rendering ----------------------------------------------
+// deck.gl was removed: for ~537 target points + a handful of contour lines,
+// native MapLibre circle/line layers are more than adequate and, crucially,
+// render into the SAME canvas/WebGL context as the basemap -- so there is no
+// separate overlay canvas that can fail silently (the failure mode the review
+// flagged). If the basemap draws, the overlay draws.
+const CONTOUR_SOURCE = "fc-contours";
+const TARGET_SOURCE = "fc-targets";
+const CONTOUR_LAYER = "fc-contour-lines";
+const TARGET_LAYER = "fc-target-circles";
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+function rgba(c: [number, number, number, number]): string {
+  return `rgba(${c[0]},${c[1]},${c[2]},${(c[3] / 255).toFixed(3)})`;
+}
+
+// A MapLibre color expression mapping a numeric feature property to a color.
+// Uses `case`/`==` rather than `match`: `match` requires INTEGER branch labels,
+// but the ensemble bands are keyed on float probabilities (0.1/0.5/0.9). `case`
+// handles both integer dose levels and float probabilities uniformly.
+function colorMatchExpr(prop: string, colors: Record<number, [number, number, number, number]>): unknown {
+  const expr: unknown[] = ["case"];
+  for (const [k, c] of Object.entries(colors)) {
+    expr.push(["==", ["get", prop], Number(k)], rgba(c));
+  }
+  expr.push("rgba(255,255,255,0.8)"); // default for unmapped values
+  return expr;
+}
+
+// Match expression coloring target dots by their (string) category.
+function categoryColorExpr(): unknown {
+  const expr: unknown[] = ["match", ["get", "category"]];
+  for (const [cat, c] of Object.entries(TARGET_COLORS)) {
+    expr.push(cat, rgba(c));
+  }
+  expr.push(rgba(TARGET_COLOR_DEFAULT));
+  return expr;
+}
+
 const form = document.getElementById("plume-form") as HTMLFormElement;
 const latInput = document.getElementById("lat") as HTMLInputElement;
 const lonInput = document.getElementById("lon") as HTMLInputElement;
@@ -129,54 +165,52 @@ if (import.meta.env.DEV) {
 // listener alone would miss.
 new ResizeObserver(() => map.resize()).observe(document.getElementById("map") as HTMLElement);
 
-let overlay: MapboxOverlay;
 let gzMarker: maplibregl.Marker | null = null;
 let currentPlume: PlumeResponse | null = null;
 
-// `overlay` (and anything that calls its `setProps`) isn't ready until this
-// fires, which can take a moment on a slow connection -- computePlume/
-// computeExchangeEnvelope await this before touching it, rather than
-// assuming the map has finished loading by the time the user hits Compute.
+// Surface render/graphics failures instead of letting them fail silently while
+// the UI reports success (the review's finding). A lost WebGL context or a
+// style error now shows in the status line.
+map.on("error", (e) => {
+  // MapLibre fires benign errors for missing tiles etc.; log all, but only
+  // alert the user on a hard failure signalled by a message.
+  console.error("MapLibre error:", (e as { error?: Error }).error ?? e);
+});
+map.getCanvas().addEventListener("webglcontextlost", () => {
+  statusEl.textContent = "Map graphics context was lost — reload the page to continue.";
+  statusEl.classList.add("error");
+});
+
+// Rendering isn't ready until the style has loaded and our sources/layers are
+// installed -- compute paths await this before calling setData.
 const mapReady: Promise<void> = new Promise((resolve) => {
   map.on("load", () => {
-    overlay = new MapboxOverlay({
-      // Non-interleaved: deck.gl draws on its own canvas above the map.
-      // Hover picking for getTooltip was verified broken live in interleaved
-      // mode (pointer within 2px of a contour line, pickingRadius 8, no
-      // pick); thin lines sitting above basemap labels is an acceptable
-      // trade for working tooltips.
-      interleaved: false,
-      layers: [],
-      // Contours are thin (3px) lines; without a picking radius the hover
-      // target is nearly impossible to hit.
-      pickingRadius: 8,
-      getTooltip: ({ object }) => {
-        if (!object) return null;
-        // Target scatter dots are plain Target objects (name/category), not
-        // GeoJSON features -- surface which target the dot is.
-        const t = object as { name?: string; category?: string };
-        if (t.name != null && t.category != null) {
-          const label = TARGET_LABELS[t.category] ?? t.category;
-          return { text: `${t.name} -- ${label}` };
-        }
-        const p = (object as { properties?: Record<string, number> }).properties;
-        if (!p) return null;
-        // Ensemble bands carry an exceedance probability, not a dose level.
-        if (p.exceedance_probability != null) {
-          return { text: `${(p.exceedance_probability * 100).toFixed(0)}% chance dose rate ≥ this level` };
-        }
-        // Single-plume features carry display_level_rhr (decay-relabeled by
-        // the slider); envelope features only have the raw H+1 level.
-        if (p.display_level_rhr != null) {
-          return { text: `${p.display_level_rhr} R/hr isodose at ${timeLabel.textContent}` };
-        }
-        if (p.dose_rate_h1_rhr != null) {
-          return { text: `${p.dose_rate_h1_rhr} R/hr isodose at H+1` };
-        }
-        return null;
+    map.addSource(TARGET_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+    map.addSource(CONTOUR_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+
+    // Target dots below the contour lines. Small in pixels so a dense missile
+    // field reads as a cluster of points, not a blob. Colored by category.
+    map.addLayer({
+      id: TARGET_LAYER,
+      type: "circle",
+      source: TARGET_SOURCE,
+      paint: {
+        "circle-radius": ["match", ["get", "category"], "icbm_lf", 2.5, 4],
+        "circle-color": categoryColorExpr() as maplibregl.ExpressionSpecification,
+        "circle-stroke-width": 0.5,
+        "circle-stroke-color": "rgba(255,255,255,0.7)",
       },
     });
-    map.addControl(overlay as unknown as maplibregl.IControl);
+
+    map.addLayer({
+      id: CONTOUR_LAYER,
+      type: "line",
+      source: CONTOUR_SOURCE,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-width": 3, "line-color": "rgba(255,255,255,0.8)" },
+    });
+
+    installHoverPopups();
     resolve();
   });
 });
@@ -319,15 +353,14 @@ exchangeModeCheckbox.addEventListener("change", () => {
   statusEl.classList.remove("error");
   timeControl.hidden = true;
   exportBtn.hidden = true;
-  overlay?.setProps({ layers: [] });
+  clearContours();
+  clearTargetMarkers();
   currentPlume = null;
   exportGeoJson = null;
   notesEl.innerHTML = "";
   legendEl.innerHTML = "";
   if (exchangeModeCheckbox.checked) {
     clearGzMarker();
-  } else {
-    clearTargetMarkers();
   }
 });
 
@@ -567,80 +600,94 @@ function clearGzMarker(): void {
   }
 }
 
-// --- full nuclear exchange: target scatter layer + static contours -----------
-// The expanded deck is ~500+ ground zeros (three Minuteman fields resolved to
-// individual silos/LCCs, plus HVTs). One MapLibre DOM Marker per target would
-// be hundreds of DOM nodes; a single deck.gl ScatterplotLayer draws them all in
-// one GPU pass and stays responsive. It's kept in a module var so the contour
-// setProps calls can re-include it instead of clobbering it.
-let targetLayer: ScatterplotLayer | null = null;
+// --- native-layer render helpers --------------------------------------------
 
-// deck.gl replaces ALL layers on each setProps, so every setProps in exchange
-// mode must re-include the target scatter beneath the contour lines.
-function setOverlayLayers(...layers: (GeoJsonLayer | ScatterplotLayer | null)[]): void {
-  overlay.setProps({ layers: layers.filter((l): l is NonNullable<typeof l> => l !== null) });
+function contourSource(): maplibregl.GeoJSONSource {
+  return map.getSource(CONTOUR_SOURCE) as maplibregl.GeoJSONSource;
+}
+function targetSource(): maplibregl.GeoJSONSource {
+  return map.getSource(TARGET_SOURCE) as maplibregl.GeoJSONSource;
+}
+
+/** Set the contour features and their color/width paint for the current mode. */
+function setContours(
+  fc: GeoJsonFeatureCollection,
+  colorExpr: unknown,
+  widthExpr: unknown,
+): void {
+  contourSource().setData(fc as unknown as GeoJSON.FeatureCollection);
+  map.setPaintProperty(CONTOUR_LAYER, "line-color", colorExpr as maplibregl.ExpressionSpecification);
+  map.setPaintProperty(CONTOUR_LAYER, "line-width", widthExpr as number);
+}
+
+function clearContours(): void {
+  contourSource().setData(EMPTY_FC as GeoJSON.FeatureCollection);
 }
 
 async function plotTargetMarkers(): Promise<void> {
   const targets = await fetchTargets(true);
-  targetLayer = new ScatterplotLayer<Target>({
-    id: "targets",
-    data: targets,
-    getPosition: (t) => [t.lon, t.lat],
-    // Silos are tiny and dense; keep dots small in pixels so a whole field
-    // reads as a cluster of points rather than a blob.
-    getRadius: (t) => (t.category === "icbm_lf" ? 2.5 : 4),
-    radiusUnits: "pixels",
-    radiusMinPixels: 2,
-    getFillColor: (t) => TARGET_COLORS[t.category] ?? TARGET_COLOR_DEFAULT,
-    stroked: true,
-    getLineColor: [255, 255, 255, 180],
-    lineWidthUnits: "pixels",
-    getLineWidth: 0.5,
-    pickable: true,
-  });
+  const fc: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features: targets.map((t) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [t.lon, t.lat] },
+      properties: { name: t.name, category: t.category },
+    })),
+  };
+  targetSource().setData(fc);
 }
 
 function clearTargetMarkers(): void {
-  targetLayer = null;
+  targetSource().setData(EMPTY_FC as GeoJSON.FeatureCollection);
 }
 
-// Exchange-envelope contours have no per-target ground zero or decay-time
-// slider to drive (see the comment on the exchange-mode toggle above) --
-// just render the fixed H+1 dose-rate levels the API returns, above the target
-// scatter layer.
+// Hover popups (native MapLibre replacement for deck.gl's getTooltip). One
+// shared popup, wired to the contour and target layers.
+function installHoverPopups(): void {
+  const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
+
+  const showContour = (e: maplibregl.MapLayerMouseEvent) => {
+    const p = e.features?.[0]?.properties as Record<string, number> | undefined;
+    if (!p) return;
+    let text: string | null = null;
+    if (p.exceedance_probability != null) {
+      text = `${(Number(p.exceedance_probability) * 100).toFixed(0)}% chance dose rate ≥ this level`;
+    } else if (p.display_level_rhr != null) {
+      text = `${p.display_level_rhr} R/hr isodose at ${timeLabel.textContent}`;
+    } else if (p.dose_rate_h1_rhr != null) {
+      text = `${p.dose_rate_h1_rhr} R/hr isodose at H+1`;
+    }
+    if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
+  };
+  const showTarget = (e: maplibregl.MapLayerMouseEvent) => {
+    const p = e.features?.[0]?.properties as { name?: string; category?: string } | undefined;
+    if (!p?.name || !p.category) return;
+    const label = TARGET_LABELS[p.category] ?? p.category;
+    popup.setLngLat(e.lngLat).setText(`${p.name} — ${label}`).addTo(map);
+  };
+  for (const [layer, handler] of [[CONTOUR_LAYER, showContour], [TARGET_LAYER, showTarget]] as const) {
+    map.on("mousemove", layer, handler);
+    map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
+    map.on("mouseleave", layer, () => {
+      map.getCanvas().style.cursor = "";
+      popup.remove();
+    });
+  }
+}
+
+// Exchange-envelope contours: fixed H+1 dose-rate levels, over the target dots.
 function renderStaticContours(fc: GeoJsonFeatureCollection): void {
-  const contourLayer = new GeoJsonLayer({
-    id: "contours",
-    data: fc as unknown as GeoJSON.FeatureCollection,
-    stroked: true,
-    filled: false,
-    getLineColor: (f: any) => LEVEL_COLORS[f.properties.dose_rate_h1_rhr] ?? [255, 255, 255, 200],
-    getLineWidth: 3,
-    lineWidthUnits: "pixels",
-    pickable: true,
-  });
-  setOverlayLayers(targetLayer, contourLayer);
+  setContours(fc, colorMatchExpr("dose_rate_h1_rhr", LEVEL_COLORS), 3);
   renderLegend(fc.features.map((f) => f.properties.dose_rate_h1_rhr).sort((a, b) => a - b));
   renderTargetLegend();
 }
 
 // --- ensemble uncertainty bands ---------------------------------------------
-// Exceedance-probability contours (10/50/90%). Rendered as nested lines from
-// the faint outer edge to the saturated core, with the inner (more-likely)
-// bands drawn thicker to reinforce the nesting.
+// Exceedance-probability contours (10/50/90%): nested lines from faint outer
+// edge to saturated core, inner (more-likely) bands drawn thicker.
 function renderEnsembleContours(fc: GeoJsonFeatureCollection): void {
-  const layer = new GeoJsonLayer({
-    id: "ensemble",
-    data: fc as unknown as GeoJSON.FeatureCollection,
-    stroked: true,
-    filled: false,
-    getLineColor: (f: any) => PROB_COLORS[f.properties.exceedance_probability] ?? [255, 255, 255, 200],
-    getLineWidth: (f: any) => 2 + 3 * (f.properties.exceedance_probability ?? 0.5),
-    lineWidthUnits: "pixels",
-    pickable: true,
-  });
-  setOverlayLayers(layer);
+  const widthExpr = ["+", 2, ["*", 3, ["to-number", ["get", "exceedance_probability"], 0.5]]];
+  setContours(fc, colorMatchExpr("exceedance_probability", PROB_COLORS), widthExpr);
   const probs = [...new Set(fc.features.map((f) => f.properties.exceedance_probability))].sort(
     (a, b) => a - b,
   );
@@ -699,24 +746,7 @@ function renderAtCurrentTime(): void {
 
   const displayed: GeoJsonFeatureCollection = { type: "FeatureCollection", features };
 
-  overlay.setProps({
-    layers: [
-      new GeoJsonLayer({
-        id: "contours",
-        // deck.gl's `data` prop type is a large union (including Promise
-        // variants) that TS can't structurally match against our plain
-        // FeatureCollection interface even though the shape is correct at
-        // runtime -- a cast here is the standard workaround.
-        data: displayed as unknown as GeoJSON.FeatureCollection,
-        stroked: true,
-        filled: false,
-        getLineColor: (f: any) => LEVEL_COLORS[f.properties.display_level_rhr] ?? [255, 255, 255, 200],
-        getLineWidth: 3,
-        lineWidthUnits: "pixels",
-        pickable: true,
-      }),
-    ],
-  });
+  setContours(displayed, colorMatchExpr("display_level_rhr", LEVEL_COLORS), 3);
 
   renderLegend(picks.map((p) => p.displayLevel));
   exportGeoJson = displayed;
