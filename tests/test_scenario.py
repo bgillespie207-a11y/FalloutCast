@@ -31,6 +31,18 @@ def test_scenario_assumptions_carry_sensitivity_bands_and_rationale():
     assert "w87" not in a.rationale.lower() and "w78" not in a.rationale.lower()
 
 
+def test_yield_policy_carries_plan_a_sources_and_notes():
+    """The scenario structure is grounded in a citable study (Princeton Plan A);
+    the policy must expose those sources and the documented not-yet-modelled
+    multi-warhead-per-city caveat, so the framing is auditable."""
+    policy = scenario.yield_policy({"city_population"})
+    joined = " ".join(policy["sources"]).lower()
+    assert "plan a" in joined and "princeton" in joined
+    assert "gao 2025" in joined
+    assert any("5-10 warheads" in n.lower() or "one ground zero per city" in n.lower()
+               for n in policy["scenario_notes"])
+
+
 def test_yield_policy_is_structured_and_states_surface_burst_caveat():
     """The response yield_policy replaces the old yield_mt:0.0 sentinel: it lists
     per-class assumptions for the categories present and states the surface-burst

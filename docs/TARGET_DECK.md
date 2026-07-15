@@ -115,11 +115,19 @@ strike, with explicit min/max sensitivity bands:
   (band 0.30–1.00) — illustrative.
 - Fission fraction held at 0.5 (no sourced per-class basis).
 
-The API reports this as a structured `yield_policy` (per-class nominal + band +
-rationale), replacing the old `yield_mt: 0.0` sentinel, and always states the
-**surface-burst bounding caveat** (surface bursts at *every* site, including
-cities — a fallout-maximizing case, not a neutral forecast). `?per_class=false`
-uses a single uniform `uniform_yield_mt`/`uniform_fission_fraction` instead.
+The scenario *structure* (US/Russia, escalating tactical → counterforce →
+countervalue against the ~30 largest cities) is grounded in Princeton Science &
+Global Security's **"Plan A"** (Wellerstein et al., 2019) — cited in the
+response's `yield_policy.sources`. The per-class *yields* remain illustrative
+(Plan A used the real deployed arsenals, no single per-class table). A known gap
+carried in `scenario_notes`: Plan A puts **5–10 warheads on each major city**;
+this deck models one ground zero per city (conservative for fallout).
+
+The API reports all of this as a structured `yield_policy` (per-class nominal +
+band + rationale + sources + notes), replacing the old `yield_mt: 0.0` sentinel,
+and always states the **surface-burst bounding caveat** (surface bursts at
+*every* site, including cities — a fallout-maximizing case, not a neutral
+forecast). `?per_class=false` uses a single uniform yield instead.
 
 ## Exchange semantics + API (done)
 

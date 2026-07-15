@@ -8,13 +8,22 @@ category error: the target's resident weapon is not what detonates on it. These
 are therefore framed as a named, editable SCENARIO of representative incoming
 yields, with sensitivity bands, not as target attributes.
 
-SOURCING / HONESTY. The yields below are ILLUSTRATIVE, order-of-magnitude
-public values for a generic modern strategic strike -- a counterforce RV in the
-few-hundred-kiloton class, a countervalue weapon up to ~1 Mt -- with explicit
-min/max bands so the sensitivity is visible rather than hidden behind a single
-number. They are NOT sourced to a specific adversary weapon system, and must
-not be read as one. Fission fraction is held at 0.5 (varying it per class has
-no sourced basis).
+SOURCING / HONESTY. The scenario STRUCTURE -- a US/Russia exchange escalating
+tactical -> counterforce (nuclear forces: ICBM fields, bomber/sub bases,
+command) -> countervalue (the ~30 most-populous cities/economic centers) -- is
+grounded in Princeton Science & Global Security's "Plan A" (Wellerstein, Patton,
+Kutt, Glaser, 2019; see SOURCES). The per-class YIELDS below remain
+ILLUSTRATIVE order-of-magnitude values (Plan A itself used the actual deployed
+arsenals, a mix of real yields, and did not publish a single per-class table),
+with explicit min/max bands so sensitivity is visible. They are NOT sourced to a
+specific adversary weapon system. Fission fraction is held at 0.5 (varying it
+per class has no sourced basis).
+
+NOT YET MODELED (documented Plan A feature). Plan A's countervalue phase puts
+5-10 warheads on EACH major city (scaled by population), not one. This deck
+models ONE ground zero per city -- a conservative simplification for fallout;
+the higher countervalue yield partially compensates. Multi-warhead-per-city is
+a real future refinement (would need the `sum` aggregation to be meaningful).
 
 BOUNDING ASSUMPTION (state this plainly wherever the envelope is shown). This
 scenario assumes a SURFACE burst at EVERY site, including population and
@@ -28,7 +37,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SCENARIO_NAME = "generic-modern-strategic-v1"
+SCENARIO_NAME = "planA-informed-strategic-v1"
+
+# Citable sources the scenario's structure/casualty scale rest on.
+SOURCES = [
+    "Princeton Science & Global Security, 'Plan A' nuclear-war simulation "
+    "(A. Wellerstein, T. Patton, M. Kutt, A. Glaser, 2019): "
+    "https://sgs.princeton.edu/the-lab/plan-a -- US/Russia exchange, phases "
+    "tactical -> counterforce -> countervalue (30 most-populous cities/economic "
+    "centers, 5-10 warheads each by population); >90M casualties in the first "
+    "hours. Uses real deployed weapon yields/targets; casualties via NUKEMAP.",
+    "Arms Control Association, 'Plan A: How a Nuclear War Could Progress' "
+    "(2020): https://www.armscontrol.org/act/2020-07/features/plan-how-nuclear-war-could-progress",
+    "Force structure (450 US Minuteman III silos; 400 deployed ICBMs): GAO 2025.",
+]
+
+# Documented Plan A feature this deck does NOT yet model (see module docstring).
+MULTI_WARHEAD_PER_CITY_NOTE = (
+    "Plan A puts 5-10 warheads on each major city (by population); this deck "
+    "models one ground zero per city (conservative for fallout)."
+)
 
 SURFACE_BURST_CAVEAT = (
     "Scenario assumes a SURFACE burst at every site (including cities and "
@@ -50,8 +78,14 @@ class YieldAssumption:
     rationale: str           # attacker-scenario framing (NOT the target's weapon)
 
 
-_COUNTERFORCE = "counterforce hard-target RV (few-hundred-kt class), illustrative"
-_COUNTERVALUE = "countervalue / soft-target weapon (up to ~1 Mt), illustrative"
+_COUNTERFORCE = (
+    "counterforce hard-target RV (few-hundred-kt class); Plan A counterforce "
+    "phase targets nuclear forces. Yield illustrative, not a specific weapon."
+)
+_COUNTERVALUE = (
+    "countervalue weapon (up to ~1 Mt); Plan A city phase hits the ~30 largest "
+    "cities. Yield illustrative, not a specific weapon."
+)
 
 # Nominal incoming yields per target class. Differentiated so counterforce and
 # countervalue footprints differ; every entry is an ATTACKER assumption.
@@ -91,6 +125,8 @@ def yield_policy(present_categories: set[str]) -> dict:
         "scenario": SCENARIO_NAME,
         "mode": "per_class",
         "surface_burst_caveat": SURFACE_BURST_CAVEAT,
+        "sources": SOURCES,
+        "scenario_notes": [MULTI_WARHEAD_PER_CITY_NOTE],
         "assumptions": [
             {
                 "category": a.category,
