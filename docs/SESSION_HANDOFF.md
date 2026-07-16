@@ -11,7 +11,8 @@ supersedes it for "what's the current state and what's next.")
   The credential is cached in the macOS keychain, so `git push` works
   non-interactively. **Workflow: commit → `git branch -f main delfic-fractionation`
   → `git push origin main`.**
-- **Latest commit:** `b4d5171` (mobile layout + time-slider ticks + landmarks).
+- **Latest commit:** see `git log` (backlog #22 usability-polish cluster landed
+  2026-07-16 as seven commits after `b4d5171`).
 - **Tests:** 105 passing — `source .venv/bin/activate && pytest -q` from repo root.
 - **Versions:** API + pyproject + web/package.json all `0.3.0` (kept in sync).
 - **Working tree:** clean.
@@ -73,28 +74,15 @@ Highlights, newest last — read `git log` for detail:
 
 ## Remaining backlog (this is the work to hand to the new context)
 
-Two tasks remain (they were tracked as tasks #22 and #23). Both are large and
-multi-item. Everything below is frontend unless noted.
-
-### #22 — usability polish (higher leverage; reshapes core workflow)
-- **Two top-level tabs** "Single location" / "National envelope" instead of the
-  `#exchange-mode` checkbox (it's a major mode change hidden as a checkbox).
-- **Basic/Advanced modes** + inline help/tooltips for jargon (WSEG-10, fission
-  fraction, shear, Tier, ensemble members).
-- **Rename Tier 0/1** to descriptive names (keep the technical term secondary).
-- **Persistent contour table** (values, distances from GZ, directions, ensemble
-  probabilities) — currently results depend on color + hover only.
-- **Color-vision-safe palette** for the dose-rate bands (`LEVEL_COLORS` in
-  `web/src/main.ts`) and probability bands (`PROB_COLORS`).
-- **Yield preset selected-state** (mark the active preset; presets have no
-  persistent selected style — see `.preset` in `style.css` / the preset click
-  handler in `main.ts`).
-- **Expandable disclaimer**: keep a short sticky banner (`#disclaimer`), move the
-  full methodology into an expandable panel (it currently overwrites the banner
-  with the long API `disclaimer` text via `disclaimerEl.textContent`).
-- **Verify GeoJSON download** actually fires (reviewer couldn't observe the
-  download event in the automated browser; the handler is the `#export-btn`
-  click in `main.ts` using a Blob + `a.click()`).
+One task remains: #23. (#22 — usability polish — was completed 2026-07-16:
+top-level mode tabs replacing the exchange checkbox, Basic/Advanced disclosure
++ inline jargon help, descriptive tier names, persistent contour table with
+reach-from-GZ + direction, Okabe-Ito/Blues color-vision-safe palettes, yield
+preset selected-state, short banner + expandable methodology panel, and the
+GeoJSON export verified live (anchor click + valid FeatureCollection blob;
+revocation now deferred). A map-recovery bug found along the way is also
+fixed: the overlay setup now retries at compute time if the style finished
+loading after the last styledata event, e.g. in a background tab.)
 
 ### #23 — SME / domain features
 - **Arrival time + cumulative dose** distinct from H+1 rate. Backend already has
@@ -160,3 +148,10 @@ docs/
   controls; prefer `read_page` refs, or `form_input`/`javascript_tool`.
 - The **exchange envelope takes ~5–6 s cold** (500+ live wind fetches, bucketed);
   warm ~0.76 s (cache keyed to the forecast valid hour).
+- **Background/hidden Browser-pane tab freezes MapLibre** (rAF is paused, so the
+  style load stalls and the map stays blank; `visibilityState === "hidden"`).
+  Taking a screenshot forces a compositor frame and un-sticks the style load;
+  DOM-level assertions via `javascript_tool` work regardless. The app-side
+  recovery (setup retry in `ensureMapReady`) means computes succeed once the
+  style JSON is in, even if the canvas can't paint until the tab is visible.
+- The frontend has **no unit-test suite** still (unchanged gap; #23 note).
