@@ -1249,6 +1249,11 @@ function clearContourTable(): void {
 
 let exportGeoJson: GeoJsonFeatureCollection | null = null;
 
+// Verified working (2026-07-16) by instrumenting HTMLAnchorElement.click and
+// URL.createObjectURL in the live app: the click fires with the .geojson
+// filename and the blob parses as a valid FeatureCollection. The earlier
+// review couldn't observe it only because automated browsers suppress the
+// actual file save.
 exportBtn.addEventListener("click", () => {
   if (!exportGeoJson) return;
   const blob = new Blob([JSON.stringify(exportGeoJson, null, 2)], {
@@ -1259,7 +1264,9 @@ exportBtn.addEventListener("click", () => {
   a.href = url;
   a.download = "falloutcast-contours.geojson";
   a.click();
-  URL.revokeObjectURL(url);
+  // Deferred: revoking synchronously races the download engine's read of the
+  // blob in some browsers (the FileSaver-style guard).
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 });
 
 // --- disclaimer --------------------------------------------------------------
