@@ -44,12 +44,48 @@ body {
 
 #disclaimer {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
   background: #7a1f1f;
   color: #fff;
   font-size: 0.8rem;
-  padding: 0.4rem 1rem;
+  padding: 0.3rem 1rem;
   text-align: center;
   line-height: 1.3;
+}
+
+#disclaimer-toggle {
+  width: auto;
+  min-height: 32px;
+  padding: 0.15rem 0.6rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+#disclaimer-toggle::before {
+  content: "▸ ";
+}
+#disclaimer-toggle[aria-expanded="true"]::before {
+  content: "▾ ";
+}
+
+/* Full methodology/limits text (the API's own disclaimer string). */
+#disclaimer-full {
+  flex: none;
+  max-height: 30dvh;
+  overflow-y: auto;
+  background: #fdf6f4;
+  color: #4a1414;
+  border-bottom: 1px solid #d8b8a8;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 0.5rem 1rem;
 }
 
 #app {

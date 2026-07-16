@@ -10,7 +10,24 @@
   <body>
     <a href="#panel" class="skip-link">Skip to controls</a>
     <a href="#map" class="skip-link">Skip to map</a>
-    <div id="disclaimer"></div>
+    <!-- Short always-visible banner + expandable methodology panel. The API's
+    full disclaimer text (which varies by compute path) goes into the panel
+    instead of overwriting the banner with several lines (UX review). -->
+    <div id="disclaimer">
+      <span
+        >Planning estimate only, not an operational product. Do not use for
+        real-world decisions.</span
+      >
+      <button
+        type="button"
+        id="disclaimer-toggle"
+        aria-expanded="false"
+        aria-controls="disclaimer-full"
+      >
+        Methodology &amp; limits
+      </button>
+    </div>
+    <div id="disclaimer-full" hidden></div>
     <main id="app">
       <aside id="panel" aria-label="Controls">
         <h1>FalloutCast</h1>

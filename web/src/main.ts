@@ -159,7 +159,8 @@ const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const overviewBtn = document.getElementById("overview-btn") as HTMLButtonElement;
 overviewBtn.addEventListener("click", () => returnToOverview());
 const notesEl = document.getElementById("notes") as HTMLDivElement;
-const disclaimerEl = document.getElementById("disclaimer") as HTMLDivElement;
+const disclaimerToggle = document.getElementById("disclaimer-toggle") as HTMLButtonElement;
+const disclaimerFullEl = document.getElementById("disclaimer-full") as HTMLDivElement;
 
 timeSlider.max = String(SLIDER_STEPS);
 
@@ -636,7 +637,7 @@ async function computeEnsembleBand(): Promise<void> {
     );
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
-    disclaimerEl.textContent = resp.disclaimer;
+    setDisclaimer(resp.disclaimer);
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
     statusEl.textContent = `P(H+1 dose rate ≥ ${resp.level_rhr} R/hr) across ${resp.n_members} members.`;
@@ -687,7 +688,7 @@ async function computeSinglePlume(): Promise<void> {
     stopElapsed();
     writeUrlState({ mode: "plume", tier });
     currentPlume = resp;
-    disclaimerEl.textContent = resp.disclaimer;
+    setDisclaimer(resp.disclaimer);
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
     statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}`;
@@ -726,7 +727,7 @@ async function computeExchangeEnvelope(): Promise<void> {
     const resp = await withTimeout(fetchExchangeEnvelope("max_single_source"));
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
-    disclaimerEl.textContent = resp.disclaimer;
+    setDisclaimer(resp.disclaimer);
     await plotFieldPolygons();
     await plotTargetMarkers();
     map.flyTo({ center: OVERVIEW, zoom: OVERVIEW_ZOOM });
@@ -1262,9 +1263,21 @@ exportBtn.addEventListener("click", () => {
 });
 
 // --- disclaimer --------------------------------------------------------------
-// Shown immediately with the static text, then replaced with the API's own
-// disclaimer string once a plume has actually been computed -- the API's
-// text is the source of truth, this is just a sane default before any
-// request has been made.
-disclaimerEl.textContent =
-  "Planning estimate only, not an operational product. Do not use for real-world decisions.";
+// The short banner text is fixed in index.html and never overwritten. The
+// API's full per-model disclaimer (the source of truth for methodology and
+// limits) lands in the expandable #disclaimer-full panel via setDisclaimer().
+
+disclaimerToggle.addEventListener("click", () => {
+  const open = disclaimerFullEl.hidden;
+  disclaimerFullEl.hidden = !open;
+  disclaimerToggle.setAttribute("aria-expanded", String(open));
+});
+
+function setDisclaimer(text: string): void {
+  disclaimerFullEl.textContent = text;
+}
+
+setDisclaimer(
+  "Compute a result to see the methodology and limitations specific to the selected model. " +
+    "All outputs are planning estimates from simplified models, not operational predictions.",
+);
