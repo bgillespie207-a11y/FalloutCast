@@ -58,19 +58,39 @@
               </label>
               <button type="button" id="zip-lookup-btn">Look up</button>
             </div>
-            <fieldset>
-              <legend>Tier</legend>
-              <label class="radio"
-                ><input type="radio" name="tier" value="0" checked /> 0 (WSEG-10,
-                fast)</label
-              >
-              <label class="radio"
-                ><input type="radio" name="tier" value="1" /> 1 (multi-layer,
-                live wind required)</label
-              >
-            </fieldset>
             <p class="hint">Click the map to set ground zero, type coordinates, or look up a ZIP code.</p>
-            <fieldset>
+            <!-- Basic/Advanced split: location + yield are enough for a first
+            plume; model choice, wind override, ensemble band and fission
+            fraction are behind this disclosure (all default to sane values). -->
+            <button type="button" id="advanced-toggle" aria-expanded="false">
+              Show advanced options
+            </button>
+            <!-- Descriptive names first, technical terms (Tier N, WSEG-10)
+            secondary — the UX review found the bare tier numbers opaque. -->
+            <fieldset class="adv">
+              <legend>Model detail</legend>
+              <label class="radio"
+                ><input type="radio" name="tier" value="0" checked /> Fast planning
+                model <span class="term">(Tier 0 · WSEG-10)</span></label
+              >
+              <label class="radio"
+                ><input type="radio" name="tier" value="1" /> Layered live-wind
+                model <span class="term">(Tier 1 · multi-layer)</span></label
+              >
+              <details class="help">
+                <summary>What do these mean?</summary>
+                <p>
+                  The fast planning model is WSEG-10, a documented analytic
+                  fallout-planning model (Hanifen 1980): it collapses the
+                  atmosphere into one effective wind plus a shear term, so it
+                  computes instantly. The layered model advects each altitude
+                  slice of the cloud with the live wind at that height, so the
+                  plume can curve where winds change with altitude. It needs a
+                  live vertical wind profile.
+                </p>
+              </details>
+            </fieldset>
+            <fieldset class="adv">
               <legend>Wind</legend>
               <label class="checkbox-row">
                 <input type="checkbox" id="manual-wind" />
@@ -93,14 +113,23 @@
                   >Shear (mph per kft)
                   <input type="number" id="wind_shear" step="any" min="0" value="0" />
                 </label>
+                <details class="help">
+                  <summary>What is shear?</summary>
+                  <p>
+                    How much the wind changes per 1,000&nbsp;ft of altitude
+                    (kft&nbsp;= kilofoot). In the fast model, shear is what
+                    spreads the fallout pattern crosswind.
+                  </p>
+                </details>
                 <p class="hint">
-                  Tier 1 needs a full vertical wind profile; with a manual wind
-                  the API computes Tier 0 instead and says so in the notes.
+                  The layered model (Tier&nbsp;1) needs a full vertical wind
+                  profile; with a manual wind the API computes the fast model
+                  (Tier&nbsp;0) instead and says so in the notes.
                 </p>
               </div>
             </fieldset>
 
-            <fieldset>
+            <fieldset class="adv">
               <legend>Uncertainty band</legend>
               <label class="checkbox-row">
                 <input type="checkbox" id="ensemble-mode" />
@@ -116,12 +145,21 @@
                   <input type="number" id="ensemble-members" step="1" min="3" max="40" value="12" />
                 </label>
                 <p class="hint">
-                  Runs Tier&nbsp;1 across live GFS-ensemble wind members and maps the
-                  probability that the H+1 dose rate exceeds this level. The outer
-                  band is where fallout <em>could</em> reach; the inner is where it
-                  very likely will. Uses real ensemble winds (not tier/manual wind);
-                  slower than a single plume.
+                  Runs the layered model (Tier&nbsp;1) across live GFS-ensemble wind
+                  members and maps the probability that the H+1 dose rate exceeds
+                  this level. The outer band is where fallout <em>could</em> reach;
+                  the inner is where it very likely will. Uses real ensemble winds
+                  (not the model/manual-wind controls); slower than a single plume.
                 </p>
+                <details class="help">
+                  <summary>What is an ensemble member?</summary>
+                  <p>
+                    The GFS ensemble is the global weather forecast run many
+                    times with slightly perturbed starting conditions; each run
+                    is one "member". More members give smoother probabilities
+                    but take longer to compute.
+                  </p>
+                </details>
               </div>
             </fieldset>
           </div>
@@ -144,7 +182,7 @@
               <button type="button" class="preset" data-yield="1">1 Mt</button>
               <button type="button" class="preset" data-yield="5">5 Mt</button>
             </div>
-            <label
+            <label class="adv"
               >Fission fraction
               <input
                 type="number"
@@ -156,6 +194,14 @@
                 required
               />
             </label>
+            <details class="help adv">
+              <summary>What is fission fraction?</summary>
+              <p>
+                The share of the total yield that comes from fission (the rest
+                is fusion). Fallout radioactivity comes from fission products,
+                so the modeled dose rates scale with this fraction.
+              </p>
+            </details>
           </div>
           <p id="per-class-note" class="hint" hidden>
             Computes a max-single-source surface-burst fallout envelope across

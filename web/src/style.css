@@ -2,6 +2,13 @@
   box-sizing: border-box;
 }
 
+/* The hidden attribute must always win: author display rules (label {
+   display: block }, .checkbox-row { display: flex }, ...) otherwise override
+   the UA's low-priority [hidden] { display: none }. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -98,6 +105,43 @@ fieldset {
   font-size: 0.75rem;
   color: #666;
   margin: 0.3rem 0 0.6rem;
+}
+
+/* Secondary technical term after a descriptive label (e.g. "(Tier 0 · WSEG-10)"). */
+.term {
+  color: #667;
+  font-size: 0.72rem;
+}
+
+/* Inline jargon explainers: collapsed one-liners that expand in place. */
+details.help {
+  font-size: 0.75rem;
+  color: #555;
+  margin: 0.1rem 0 0.5rem;
+}
+details.help summary {
+  cursor: pointer;
+  color: #33506b;
+  padding: 0.5rem 0; /* comfortable touch target without visual bulk */
+}
+details.help p {
+  margin: 0.2rem 0 0.3rem;
+}
+
+/* Basic/advanced disclosure: a quiet secondary control, not a green CTA. */
+#advanced-toggle {
+  background: #eceae6;
+  color: #333;
+  border: 1px solid #bbb;
+  min-height: 44px;
+  margin-bottom: 0.8rem;
+  font-size: 0.82rem;
+}
+#advanced-toggle::before {
+  content: "▸ ";
+}
+#advanced-toggle[aria-expanded="true"]::before {
+  content: "▾ ";
 }
 
 .zip-row {

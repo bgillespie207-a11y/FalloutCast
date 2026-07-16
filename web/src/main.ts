@@ -64,6 +64,12 @@ const PROB_LABELS: Record<number, string> = {
   0.9: "90% — very likely",
 };
 
+// Descriptive model names, technical term secondary (matches the radio labels).
+const TIER_NAMES: Record<number, string> = {
+  0: "Fast planning model (Tier 0, WSEG-10)",
+  1: "Layered live-wind model (Tier 1)",
+};
+
 // Human-readable labels for the target-category legend.
 const TARGET_LABELS: Record<string, string> = {
   icbm_lf: "ICBM silo (LF)",
@@ -285,6 +291,26 @@ form.addEventListener("submit", async (e) => {
 manualWindCheckbox.addEventListener("change", () => {
   manualWindFields.hidden = !manualWindCheckbox.checked;
 });
+
+// --- basic/advanced disclosure -------------------------------------------------
+// Everything tagged .adv (model choice, wind override, ensemble band, fission
+// fraction) hides behind one toggle; all of it has sane defaults, so a first
+// compute needs only a location and a yield. Hiding never changes any value --
+// collapsed advanced settings still apply (the compute-button text reflects an
+// active ensemble mode, so it can't be silently forgotten).
+
+const advToggle = document.getElementById("advanced-toggle") as HTMLButtonElement;
+let advancedShown = false;
+
+function setAdvanced(show: boolean): void {
+  advancedShown = show;
+  advToggle.setAttribute("aria-expanded", String(show));
+  advToggle.textContent = show ? "Hide advanced options" : "Show advanced options";
+  for (const el of document.querySelectorAll<HTMLElement>(".adv")) el.hidden = !show;
+}
+
+advToggle.addEventListener("click", () => setAdvanced(!advancedShown));
+setAdvanced(false);
 
 // --- ensemble uncertainty-band toggle ----------------------------------------
 // Ensemble is a single-ground-zero operation (like the plume view) but runs
@@ -636,7 +662,7 @@ async function computeSinglePlume(): Promise<void> {
     disclaimerEl.textContent = resp.disclaimer;
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
-    statusEl.textContent = `Tier ${resp.tier_used} used. Wind: ${describeWind(resp)}`;
+    statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}`;
     renderNotes(resp);
     timeControl.hidden = false;
     exportBtn.hidden = false;
@@ -748,6 +774,9 @@ function readUrlState(): void {
   if (tier === "0" || tier === "1") {
     const radio = form.querySelector<HTMLInputElement>(`input[name="tier"][value="${tier}"]`);
     if (radio) radio.checked = true;
+    // A shared link with the non-default model should show that choice, not
+    // hide it behind the collapsed advanced section.
+    if (tier === "1") setAdvanced(true);
   }
 }
 
