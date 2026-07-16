@@ -268,6 +268,12 @@ setupMapOverlay(); // in case the style is already loaded synchronously (cached)
 // timeout is now rare: it waits only for the STYLE, not for basemap tiles.
 function ensureMapReady(): Promise<void> {
   if (mapSetupDone) return Promise.resolve();
+  // Retry the (idempotent) setup here: styledata can fire while the tab is
+  // hidden with isStyleLoaded() still false (rAF is paused in background
+  // tabs, so MapLibre's load sequence stalls mid-way). Without this, setup
+  // never re-runs after the style finishes and every compute times out.
+  setupMapOverlay();
+  if (mapSetupDone) return Promise.resolve();
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(
       () => reject(new ApiError("Map style failed to load. Check your connection and reload.")),
