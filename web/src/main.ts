@@ -24,13 +24,16 @@ const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 // reviewer found 1000 steps made keyboard nudges invisible).
 const SLIDER_STEPS = 200;
 
-// Fixed color per civil-defense dose-rate band, brightest/most alarming for
-// the highest band. RGBA, deck.gl convention.
+// Fixed color per civil-defense dose-rate band. Colors are from the Okabe-Ito
+// colorblind-safe palette (Okabe & Ito 2008) plus black, ordered by strictly
+// decreasing lightness, so band severity reads correctly under all common
+// color-vision deficiencies and in grayscale -- hue is reinforcement, not the
+// only signal (the UX review flagged the old yellow/orange/red ramp). RGBA.
 const LEVEL_COLORS: Record<number, [number, number, number, number]> = {
-  1: [255, 221, 87, 200],
-  10: [255, 152, 0, 210],
-  100: [230, 74, 25, 220],
-  1000: [136, 14, 14, 230],
+  1: [240, 228, 66, 200], // yellow
+  10: [230, 159, 0, 210], // orange
+  100: [213, 94, 0, 220], // vermillion
+  1000: [0, 0, 0, 235], // black
 };
 
 // Ground-zero dot color per target category, for the full-exchange scatter
@@ -49,14 +52,16 @@ const TARGET_COLORS: Record<string, [number, number, number, number]> = {
 };
 const TARGET_COLOR_DEFAULT: [number, number, number, number] = [120, 120, 120, 200];
 
-// Ensemble exceedance-probability bands. A cool sequential ramp, deliberately
-// distinct from the warm dose-rate palette above so the two views never read as
-// the same thing: the outer 10% band ("could reach") is faint, the inner 90%
-// ("very likely") is saturated. RGBA, deck.gl convention.
+// Ensemble exceedance-probability bands. A single-hue blue lightness ramp
+// (ColorBrewer "Blues" classes 4/6/9): distinguishing by lightness rather than
+// hue makes it safe under every color-vision deficiency and in grayscale, and
+// keeps it deliberately distinct from the warm dose-rate palette above so the
+// two views never read as the same thing: the outer 10% band ("could reach")
+// is faint, the inner 90% ("very likely") is near-black. RGBA.
 const PROB_COLORS: Record<number, [number, number, number, number]> = {
-  0.1: [140, 190, 225, 200],
-  0.5: [60, 120, 200, 220],
-  0.9: [30, 40, 130, 240],
+  0.1: [158, 202, 225, 200],
+  0.5: [66, 146, 198, 220],
+  0.9: [8, 48, 107, 240],
 };
 const PROB_LABELS: Record<number, string> = {
   0.1: "10% — outer edge (could reach)",
