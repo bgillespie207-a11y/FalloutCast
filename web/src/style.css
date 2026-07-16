@@ -133,9 +133,19 @@ button:disabled {
   cursor: default;
 }
 
+.result-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+.result-actions button {
+  margin-top: 0;
+}
 #export-btn {
   background: #444;
-  margin-top: 0.8rem;
+}
+#overview-btn {
+  background: #33506b;
 }
 
 #status {

@@ -141,6 +141,8 @@ const timeSlider = document.getElementById("time-slider") as HTMLInputElement;
 const timeLabel = document.getElementById("time-label") as HTMLSpanElement;
 const legendEl = document.getElementById("legend") as HTMLDivElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
+const overviewBtn = document.getElementById("overview-btn") as HTMLButtonElement;
+overviewBtn.addEventListener("click", () => returnToOverview());
 const notesEl = document.getElementById("notes") as HTMLDivElement;
 const disclaimerEl = document.getElementById("disclaimer") as HTMLDivElement;
 
@@ -296,14 +298,37 @@ function updateComputeButtonText(): void {
   }
 }
 
+// Clear every result artifact from the map + panel, so a mode switch or input
+// change never leaves a stale plume/envelope on screen labelled with the wrong
+// controls (the reviewer's finding).
+function clearFieldPolygons(): void {
+  (map.getSource(FIELD_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
+    EMPTY_FC as GeoJSON.FeatureCollection,
+  );
+}
+function clearResults(): void {
+  clearContours();
+  clearTargetMarkers();
+  clearFieldPolygons();
+  clearGzMarker();
+  currentPlume = null;
+  exportGeoJson = null;
+  notesEl.innerHTML = "";
+  legendEl.innerHTML = "";
+  timeControl.hidden = true;
+  exportBtn.hidden = true;
+  overviewBtn.hidden = true;
+}
+
 ensembleModeCheckbox.addEventListener("change", () => {
   newComputeToken(); // invalidate any in-flight compute for the previous mode
   ensembleFields.hidden = !ensembleModeCheckbox.checked;
   updateComputeButtonText();
-  // Switching mode invalidates any deterministic plume on screen (the decay
-  // slider has no meaning for a probability band), so clear that state.
-  timeControl.hidden = true;
-  currentPlume = null;
+  // Switching mode clears any prior result (a single plume's decay slider has
+  // no meaning for a probability band, and a stale plume mustn't linger).
+  clearResults();
+  statusEl.textContent = "";
+  statusEl.classList.remove("error");
 });
 
 /** Returns the manual wind to send, or null if the override is off.
@@ -385,17 +410,7 @@ exchangeModeCheckbox.addEventListener("change", () => {
   updateComputeButtonText();
   statusEl.textContent = "";
   statusEl.classList.remove("error");
-  timeControl.hidden = true;
-  exportBtn.hidden = true;
-  clearContours();
-  clearTargetMarkers();
-  currentPlume = null;
-  exportGeoJson = null;
-  notesEl.innerHTML = "";
-  legendEl.innerHTML = "";
-  if (exchangeModeCheckbox.checked) {
-    clearGzMarker();
-  }
+  clearResults();
 });
 
 async function computePlume(): Promise<void> {
@@ -434,10 +449,83 @@ function markStatusError(msg: string): void {
   statusEl.setAttribute("aria-live", "assertive");
 }
 
+// Validate a ground-zero before hitting the backend, so the user gets a
+// field-level message instead of a raw HTTP 422 JSON dump.
+function readGroundZero(): { lat: number; lon: number } {
+  const lat = Number(latInput.value);
+  const lon = Number(lonInput.value);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    throw new ApiError("Latitude must be between −90 and 90.");
+  }
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+    throw new ApiError("Longitude must be between −180 and 180.");
+  }
+  return { lat, lon };
+}
+
+// Elapsed-time ticker for long computes (the national envelope can take tens of
+// seconds): keeps the status line updating so it never looks hung, and enforces
+// a client-side timeout with a friendly message.
+const COMPUTE_TIMEOUT_MS = 90_000;
+let elapsedTimer: number | undefined;
+function startElapsed(label: string): void {
+  const t0 = performance.now();
+  const tick = () => {
+    const s = Math.round((performance.now() - t0) / 1000);
+    statusEl.textContent = `${label} (${s}s elapsed…)`;
+  };
+  tick();
+  elapsedTimer = window.setInterval(tick, 1000);
+}
+function stopElapsed(): void {
+  if (elapsedTimer !== undefined) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = undefined;
+  }
+}
+function withTimeout<T>(p: Promise<T>): Promise<T> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new ApiError(`Computation timed out after ${COMPUTE_TIMEOUT_MS / 1000}s. Try again, or reduce scope.`)),
+      COMPUTE_TIMEOUT_MS,
+    ),
+  );
+  return Promise.race([p, timeout]);
+}
+
+// --- map framing ------------------------------------------------------------
+const OVERVIEW: [number, number] = [-98.5, 39.8];
+const OVERVIEW_ZOOM = 3.3;
+
+// Fit the map to a set of GeoJSON features (the computed contours) so a local
+// plume isn't lost at continental scale. Falls back to a gentle flyTo if the
+// features have no usable extent.
+function fitToFeatures(fc: GeoJsonFeatureCollection, fallback?: [number, number]): void {
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+  const visit = (coords: unknown): void => {
+    if (typeof (coords as number[])[0] === "number" && (coords as number[]).length >= 2) {
+      const [lon, lat] = coords as number[];
+      minLon = Math.min(minLon, lon); maxLon = Math.max(maxLon, lon);
+      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat);
+    } else if (Array.isArray(coords)) {
+      for (const c of coords) visit(c);
+    }
+  };
+  for (const f of fc.features) visit(f.geometry.coordinates);
+  if (Number.isFinite(minLon) && (maxLon - minLon > 0 || maxLat - minLat > 0)) {
+    map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, maxZoom: 9, duration: 600 });
+  } else if (fallback) {
+    map.flyTo({ center: fallback, zoom: 7 });
+  }
+}
+
+function returnToOverview(): void {
+  map.flyTo({ center: OVERVIEW, zoom: OVERVIEW_ZOOM, duration: 600 });
+}
+
 async function computeEnsembleBand(): Promise<void> {
   const token = newComputeToken();
   computeBtn.disabled = true;
-  statusEl.textContent = "Computing ensemble band (fetches live GFS-ensemble winds, runs Tier-1 per member)...";
   statusEl.classList.remove("error");
   statusEl.classList.add("busy");
   timeControl.hidden = true; // probability band has no decay slider
@@ -448,37 +536,43 @@ async function computeEnsembleBand(): Promise<void> {
   const level = Number(ensembleLevelInput.value);
   const members = Number(ensembleMembersInput.value);
   if (!Number.isFinite(level) || level <= 0) {
-    statusEl.textContent = "Dose level to band must be a positive number of R/hr.";
+    markStatusError("Dose level to band must be a positive number of R/hr.");
     statusEl.classList.remove("busy");
-    statusEl.classList.add("error");
     computeBtn.disabled = false;
     return;
   }
 
   try {
+    const { lat, lon } = readGroundZero();
     await ensureMapReady();
-    const resp = await fetchEnsemble({
-      lat: Number(latInput.value),
-      lon: Number(lonInput.value),
-      yield_mt: Number(yieldInput.value),
-      fission_fraction: Number(ffInput.value),
-      level_rhr: level,
-      n_members: Math.round(members),
-    });
+    startElapsed(`Computing uncertainty band across ${Math.round(members)} members`);
+    const resp = await withTimeout(
+      fetchEnsemble({
+        lat,
+        lon,
+        yield_mt: Number(yieldInput.value),
+        fission_fraction: Number(ffInput.value),
+        level_rhr: level,
+        n_members: Math.round(members),
+      }),
+    );
     if (isStale(token)) return; // mode changed mid-compute; discard
+    stopElapsed();
     disclaimerEl.textContent = resp.disclaimer;
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
-    map.flyTo({ center: resp.ground_zero, zoom: 6 });
 
     statusEl.textContent = `P(H+1 dose rate ≥ ${resp.level_rhr} R/hr) across ${resp.n_members} members.`;
     renderPlainNotes(resp.notes);
     renderEnsembleContours(resp.contours);
     exportGeoJson = resp.contours;
     exportBtn.hidden = false;
+    overviewBtn.hidden = false;
+    fitToFeatures(resp.contours, [resp.ground_zero[0], resp.ground_zero[1]]);
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
     markStatusError(`Failed: ${msg}`);
   } finally {
+    stopElapsed();
     statusEl.classList.remove("busy");
     computeBtn.disabled = false;
   }
@@ -487,9 +581,6 @@ async function computeEnsembleBand(): Promise<void> {
 async function computeSinglePlume(): Promise<void> {
   const token = newComputeToken();
   computeBtn.disabled = true;
-  statusEl.textContent = manualWindCheckbox.checked
-    ? "Computing (manual wind)..."
-    : "Computing (fetches live wind)...";
   statusEl.classList.remove("error");
   statusEl.classList.add("busy");
   timeControl.hidden = true;
@@ -500,33 +591,40 @@ async function computeSinglePlume(): Promise<void> {
 
   try {
     const wind = manualWindFromForm();
+    const { lat, lon } = readGroundZero();
     await ensureMapReady();
-    const resp = await fetchPlume({
-      lat: Number(latInput.value),
-      lon: Number(lonInput.value),
-      yield_mt: Number(yieldInput.value),
-      fission_fraction: Number(ffInput.value),
-      tier,
-      ...(wind ? { wind } : {}),
-      levels_rhr: fetchLevelSet(),
-    });
+    startElapsed(manualWindCheckbox.checked ? "Computing (manual wind)" : "Computing (fetches live wind)");
+    const resp = await withTimeout(
+      fetchPlume({
+        lat,
+        lon,
+        yield_mt: Number(yieldInput.value),
+        fission_fraction: Number(ffInput.value),
+        tier,
+        ...(wind ? { wind } : {}),
+        levels_rhr: fetchLevelSet(),
+      }),
+    );
     if (isStale(token)) return; // mode changed mid-compute; discard
+    stopElapsed();
     writeUrlState({ mode: "plume", tier });
     currentPlume = resp;
     disclaimerEl.textContent = resp.disclaimer;
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
-    map.flyTo({ center: resp.ground_zero, zoom: 6 });
 
     statusEl.textContent = `Tier ${resp.tier_used} used. Wind: ${describeWind(resp)}`;
     renderNotes(resp);
     timeControl.hidden = false;
     exportBtn.hidden = false;
+    overviewBtn.hidden = false;
     timeSlider.value = "0";
     renderAtCurrentTime();
+    fitToFeatures(resp.contours, [resp.ground_zero[0], resp.ground_zero[1]]);
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
     markStatusError(`Failed: ${msg}`);
   } finally {
+    stopElapsed();
     statusEl.classList.remove("busy");
     computeBtn.disabled = false;
   }
@@ -535,7 +633,6 @@ async function computeSinglePlume(): Promise<void> {
 async function computeExchangeEnvelope(): Promise<void> {
   const token = newComputeToken();
   computeBtn.disabled = true;
-  statusEl.textContent = "Computing national max-envelope (fetches live wind for all targets)...";
   statusEl.classList.remove("error");
   statusEl.classList.add("busy");
   timeControl.hidden = true; // envelope has no dense level set -- no decay slider
@@ -545,12 +642,16 @@ async function computeExchangeEnvelope(): Promise<void> {
 
   try {
     await ensureMapReady();
-    const resp = await fetchExchangeEnvelope("max_single_source");
+    // ~500 live wind buckets + grid compositing: seconds, not instant. Keep an
+    // elapsed ticker running so it never looks hung (the reviewer's finding).
+    startElapsed("Computing national envelope (live wind for the whole deck)");
+    const resp = await withTimeout(fetchExchangeEnvelope("max_single_source"));
     if (isStale(token)) return; // mode changed mid-compute; discard
+    stopElapsed();
     disclaimerEl.textContent = resp.disclaimer;
     await plotFieldPolygons();
     await plotTargetMarkers();
-    map.flyTo({ center: [-98.5, 39.8], zoom: 3.3 });
+    map.flyTo({ center: OVERVIEW, zoom: OVERVIEW_ZOOM });
 
     writeUrlState({ mode: "exchange" });
     const validHour = resp.weather ? ` · winds valid ${resp.weather.valid_time}Z` : "";
@@ -572,10 +673,12 @@ async function computeExchangeEnvelope(): Promise<void> {
       excluded_target_ids: resp.excluded_target_ids,
     } as GeoJsonFeatureCollection;
     exportBtn.hidden = false;
+    overviewBtn.hidden = false;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
     markStatusError(`Failed: ${msg}`);
   } finally {
+    stopElapsed();
     statusEl.classList.remove("busy");
     computeBtn.disabled = false;
   }
