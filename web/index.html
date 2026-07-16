@@ -159,7 +159,9 @@
           <button type="submit" id="compute-btn">Compute plume</button>
         </form>
 
-        <div id="status"></div>
+        <!-- Live region: progress is announced politely; failures are switched
+        to role="alert" (assertive) in JS so screen readers interrupt. -->
+        <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
 
         <section id="time-control" hidden>
           <label for="time-slider">

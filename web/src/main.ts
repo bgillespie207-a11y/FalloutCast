@@ -185,63 +185,76 @@ map.getCanvas().addEventListener("webglcontextlost", () => {
   statusEl.classList.add("error");
 });
 
-// Rendering isn't ready until the style has loaded and our sources/layers are
-// installed -- compute paths await this before calling setData.
-const mapReady: Promise<void> = new Promise((resolve) => {
-  map.on("load", () => {
-    map.addSource(FIELD_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
-    map.addSource(TARGET_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
-    map.addSource(CONTOUR_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
-
-    // Documented field FOOTPRINTS (the verifiable geography). Dashed outline
-    // underneath the synthetic points, so it's clear the field extent is real
-    // even though the individual dots inside it are not.
-    map.addLayer({
-      id: FIELD_LAYER,
-      type: "line",
-      source: FIELD_SOURCE,
-      paint: {
-        "line-color": "rgba(120,120,130,0.9)",
-        "line-width": 1.5,
-        "line-dasharray": [3, 2],
-      },
-    });
-
-    // Target dots below the contour lines. Small in pixels so a dense missile
-    // field reads as a cluster of points, not a blob. Colored by category.
-    map.addLayer({
-      id: TARGET_LAYER,
-      type: "circle",
-      source: TARGET_SOURCE,
-      paint: {
-        "circle-radius": ["match", ["get", "category"], "icbm_lf", 2.5, 4],
-        "circle-color": categoryColorExpr() as maplibregl.ExpressionSpecification,
-        "circle-stroke-width": 0.5,
-        "circle-stroke-color": "rgba(255,255,255,0.7)",
-      },
-    });
-
-    map.addLayer({
-      id: CONTOUR_LAYER,
-      type: "line",
-      source: CONTOUR_SOURCE,
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-width": 3, "line-color": "rgba(255,255,255,0.8)" },
-    });
-
-    installHoverPopups();
-    resolve();
-  });
+// Our overlay is "ready" once the STYLE is loaded and our sources/layers are
+// installed. We deliberately do NOT gate on the `load` event: `load` also waits
+// for the initial basemap TILES, so a slow or blocked external tile host delays
+// it for many seconds and makes compute spuriously fail with "map tiles never
+// finished loading" even though the overlay could render fine. Adding sources/
+// layers only needs the style, so we do it on `styledata` as soon as the style
+// is ready -- contours render regardless of basemap tile availability.
+let mapSetupDone = false;
+let resolveMapReady!: () => void;
+const mapReady = new Promise<void>((resolve) => {
+  resolveMapReady = resolve;
 });
 
-// A bare `await mapReady` would hang the "Computing..." status forever if
-// the basemap's tiles never finish loading (slow/blocked network) -- fail
-// loudly after a timeout instead of leaving the user with no feedback.
+function setupMapOverlay(): void {
+  if (mapSetupDone || !map.isStyleLoaded()) return;
+
+  map.addSource(FIELD_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+  map.addSource(TARGET_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+  map.addSource(CONTOUR_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+
+  // Documented field FOOTPRINTS (the verifiable geography). Dashed outline
+  // underneath the synthetic points, so it's clear the field extent is real
+  // even though the individual dots inside it are not.
+  map.addLayer({
+    id: FIELD_LAYER,
+    type: "line",
+    source: FIELD_SOURCE,
+    paint: { "line-color": "rgba(120,120,130,0.9)", "line-width": 1.5, "line-dasharray": [3, 2] },
+  });
+
+  // Target dots below the contour lines. Small in pixels so a dense missile
+  // field reads as a cluster of points, not a blob. Colored by category.
+  map.addLayer({
+    id: TARGET_LAYER,
+    type: "circle",
+    source: TARGET_SOURCE,
+    paint: {
+      "circle-radius": ["match", ["get", "category"], "icbm_lf", 2.5, 4],
+      "circle-color": categoryColorExpr() as maplibregl.ExpressionSpecification,
+      "circle-stroke-width": 0.5,
+      "circle-stroke-color": "rgba(255,255,255,0.7)",
+    },
+  });
+
+  map.addLayer({
+    id: CONTOUR_LAYER,
+    type: "line",
+    source: CONTOUR_SOURCE,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-width": 3, "line-color": "rgba(255,255,255,0.8)" },
+  });
+
+  installHoverPopups();
+  mapSetupDone = true;
+  resolveMapReady();
+}
+
+map.on("styledata", setupMapOverlay); // fires when the style is ready (before tiles)
+map.on("load", setupMapOverlay); // fallback
+setupMapOverlay(); // in case the style is already loaded synchronously (cached)
+
+// `await mapReady` alone could hang the "Computing..." status forever if the
+// style never loads (dead connection) -- fail loudly after a timeout. This
+// timeout is now rare: it waits only for the STYLE, not for basemap tiles.
 function ensureMapReady(): Promise<void> {
+  if (mapSetupDone) return Promise.resolve();
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(
-      () => reject(new ApiError("Map tiles never finished loading. Check your connection and reload.")),
-      15000,
+      () => reject(new ApiError("Map style failed to load. Check your connection and reload.")),
+      20000,
     ),
   );
   return Promise.race([mapReady, timeout]);
@@ -284,6 +297,7 @@ function updateComputeButtonText(): void {
 }
 
 ensembleModeCheckbox.addEventListener("change", () => {
+  newComputeToken(); // invalidate any in-flight compute for the previous mode
   ensembleFields.hidden = !ensembleModeCheckbox.checked;
   updateComputeButtonText();
   // Switching mode invalidates any deterministic plume on screen (the decay
@@ -362,6 +376,7 @@ async function lookupZip(): Promise<void> {
 // ignored, while this is checked.
 
 exchangeModeCheckbox.addEventListener("change", () => {
+  newComputeToken(); // invalidate any in-flight compute for the previous mode
   singleTargetFields.hidden = exchangeModeCheckbox.checked;
   // Global yield/fission drive only the single-plume view; the envelope uses
   // per-target-class yields server-side, so swap the input for a summary note.
@@ -384,16 +399,43 @@ exchangeModeCheckbox.addEventListener("change", () => {
 });
 
 async function computePlume(): Promise<void> {
-  if (exchangeModeCheckbox.checked) {
-    await computeExchangeEnvelope();
-  } else if (ensembleModeCheckbox.checked) {
-    await computeEnsembleBand();
-  } else {
-    await computeSinglePlume();
+  // Reset the status region to a polite progress announcer, and mark the
+  // button busy for assistive tech, around whichever compute path runs.
+  statusEl.setAttribute("role", "status");
+  statusEl.setAttribute("aria-live", "polite");
+  computeBtn.setAttribute("aria-busy", "true");
+  try {
+    if (exchangeModeCheckbox.checked) {
+      await computeExchangeEnvelope();
+    } else if (ensembleModeCheckbox.checked) {
+      await computeEnsembleBand();
+    } else {
+      await computeSinglePlume();
+    }
+  } finally {
+    computeBtn.removeAttribute("aria-busy");
   }
 }
 
+// Monotonic token: each compute grabs the next value; a mode switch bumps it so
+// an in-flight compute whose token is now stale discards its result instead of
+// rendering into the wrong mode.
+let computeSeq = 0;
+function newComputeToken(): number {
+  return ++computeSeq;
+}
+function isStale(token: number): boolean {
+  return token !== computeSeq;
+}
+function markStatusError(msg: string): void {
+  statusEl.textContent = msg;
+  statusEl.classList.add("error");
+  statusEl.setAttribute("role", "alert");
+  statusEl.setAttribute("aria-live", "assertive");
+}
+
 async function computeEnsembleBand(): Promise<void> {
+  const token = newComputeToken();
   computeBtn.disabled = true;
   statusEl.textContent = "Computing ensemble band (fetches live GFS-ensemble winds, runs Tier-1 per member)...";
   statusEl.classList.remove("error");
@@ -423,6 +465,7 @@ async function computeEnsembleBand(): Promise<void> {
       level_rhr: level,
       n_members: Math.round(members),
     });
+    if (isStale(token)) return; // mode changed mid-compute; discard
     disclaimerEl.textContent = resp.disclaimer;
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
     map.flyTo({ center: resp.ground_zero, zoom: 6 });
@@ -434,8 +477,7 @@ async function computeEnsembleBand(): Promise<void> {
     exportBtn.hidden = false;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
-    statusEl.textContent = `Failed: ${msg}`;
-    statusEl.classList.add("error");
+    markStatusError(`Failed: ${msg}`);
   } finally {
     statusEl.classList.remove("busy");
     computeBtn.disabled = false;
@@ -443,6 +485,7 @@ async function computeEnsembleBand(): Promise<void> {
 }
 
 async function computeSinglePlume(): Promise<void> {
+  const token = newComputeToken();
   computeBtn.disabled = true;
   statusEl.textContent = manualWindCheckbox.checked
     ? "Computing (manual wind)..."
@@ -467,6 +510,7 @@ async function computeSinglePlume(): Promise<void> {
       ...(wind ? { wind } : {}),
       levels_rhr: fetchLevelSet(),
     });
+    if (isStale(token)) return; // mode changed mid-compute; discard
     writeUrlState({ mode: "plume", tier });
     currentPlume = resp;
     disclaimerEl.textContent = resp.disclaimer;
@@ -481,8 +525,7 @@ async function computeSinglePlume(): Promise<void> {
     renderAtCurrentTime();
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
-    statusEl.textContent = `Failed: ${msg}`;
-    statusEl.classList.add("error");
+    markStatusError(`Failed: ${msg}`);
   } finally {
     statusEl.classList.remove("busy");
     computeBtn.disabled = false;
@@ -490,6 +533,7 @@ async function computeSinglePlume(): Promise<void> {
 }
 
 async function computeExchangeEnvelope(): Promise<void> {
+  const token = newComputeToken();
   computeBtn.disabled = true;
   statusEl.textContent = "Computing national max-envelope (fetches live wind for all targets)...";
   statusEl.classList.remove("error");
@@ -502,6 +546,7 @@ async function computeExchangeEnvelope(): Promise<void> {
   try {
     await ensureMapReady();
     const resp = await fetchExchangeEnvelope("max_single_source");
+    if (isStale(token)) return; // mode changed mid-compute; discard
     disclaimerEl.textContent = resp.disclaimer;
     await plotFieldPolygons();
     await plotTargetMarkers();
@@ -529,8 +574,7 @@ async function computeExchangeEnvelope(): Promise<void> {
     exportBtn.hidden = false;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
-    statusEl.textContent = `Failed: ${msg}`;
-    statusEl.classList.add("error");
+    markStatusError(`Failed: ${msg}`);
   } finally {
     statusEl.classList.remove("busy");
     computeBtn.disabled = false;

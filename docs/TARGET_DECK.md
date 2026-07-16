@@ -60,7 +60,8 @@ Two hard blockers stood between 10 targets and 500+:
   window of its ground zero (WSEG-10 dose decays to ~0 within a few hundred
   miles), so cost is O(targets × local cells). `radius_deg=None` (default)
   keeps the exact original full-grid path, so existing tests/results are
-  unchanged; the API passes `radius_deg=8.0` for the expanded deck.
+  unchanged; the API passes `radius_deg=10.0` (~690 mi, safely beyond the
+  largest scenario yield's plume reach) for the expanded deck.
 
 **Measured:** full 537-target envelope with live wind end-to-end **~5–6 s**
 (grid math itself ~0.5 s; the rest is the bucketed wind fetches). All 537
@@ -147,13 +148,13 @@ forecast). `?per_class=false` uses a single uniform yield instead.
 ## Wind caching (done)
 
 `openmeteo.cached_fetch_profile` wraps `fetch_profile` (which stays pure) with a
-single-process TTL cache keyed on `(rounded point, met window)`, plus in-flight
-de-duplication so concurrent misses share one network call. The envelope's
-bucket fetch uses it, so repeat/concurrent calls reuse per-bucket profiles
-instead of re-hitting Open-Meteo. Measured: **cold ~5.8 s → warm ~0.76 s**
-(~8×; the warm call is just the grid math). The 1 h window matches what
-`fetch_profile` actually reads (the current-hour forecast) and bounds staleness;
-GFS refreshes ~4×/day, HRRR hourly. In-memory/single-node — a multi-worker
+single-process cache keyed on `(rounded point, forecast valid hour)`, plus
+in-flight de-duplication so concurrent misses share one network call. The
+envelope's bucket fetch uses it, so repeat/concurrent calls reuse per-bucket
+profiles instead of re-hitting Open-Meteo. Measured: **cold ~5.8 s → warm
+~0.76 s** (~8×; the warm call is just the grid math). Keying to the forecast
+valid hour (not a wall-clock TTL) means a rolled-over hour is never served
+stale; GFS refreshes ~4×/day, HRRR hourly. In-memory/single-node — a multi-worker
 deploy would want a shared cache (Redis).
 
 ## Still worth improving (ranked)

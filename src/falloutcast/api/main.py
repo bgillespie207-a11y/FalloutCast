@@ -46,7 +46,7 @@ from ..weather import openmeteo
 
 app = FastAPI(
     title="FalloutCast",
-    version="0.2.0",
+    version="0.3.0",
     summary="Weather-driven nuclear fallout visualization (WSEG-10 + multi-layer).",
 )
 

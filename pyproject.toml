@@ -1,6 +1,6 @@
 [project]
 name = "falloutcast"
-version = "0.1.0"
+version = "0.3.0"
 description = "Weather-driven nuclear fallout visualization (WSEG-10 Tier-0)."
 requires-python = ">=3.11"
 dependencies = [
