@@ -8,9 +8,11 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <a href="#panel" class="skip-link">Skip to controls</a>
+    <a href="#map" class="skip-link">Skip to map</a>
     <div id="disclaimer"></div>
-    <div id="app">
-      <aside id="panel">
+    <main id="app">
+      <aside id="panel" aria-label="Controls">
         <h1>FalloutCast</h1>
         <p class="subtitle">Weather-driven fallout planning estimate</p>
 
@@ -167,7 +169,30 @@
           <label for="time-slider">
             Time after burst: <span id="time-label">H+1</span>
           </label>
-          <input type="range" id="time-slider" min="0" max="1000" value="0" />
+          <input
+            type="range"
+            id="time-slider"
+            min="0"
+            max="200"
+            step="1"
+            value="0"
+            list="time-ticks"
+            aria-describedby="time-ticks-labels"
+          />
+          <datalist id="time-ticks">
+            <option value="0"></option>
+            <option value="70"></option>
+            <option value="124"></option>
+            <option value="151"></option>
+            <option value="200"></option>
+          </datalist>
+          <div id="time-ticks-labels" class="tick-labels" aria-hidden="true">
+            <span style="left: 0%">H+1</span>
+            <span style="left: 35%">H+6</span>
+            <span style="left: 62%">H+24</span>
+            <span style="left: 75%">H+48</span>
+            <span style="left: 100%">H+7d</span>
+          </div>
         </section>
         <!-- Outside #time-control: the exchange-envelope view has a legend
         (fixed H+1 levels) but no decay-time slider, so the two can't share
@@ -181,8 +206,8 @@
 
         <div id="notes"></div>
       </aside>
-      <div id="map"></div>
-    </div>
+      <div id="map" role="region" aria-label="Fallout map" tabindex="-1"></div>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -19,7 +19,10 @@ import { fetchLevelSet, levelsForTime, TIME_MIN_HOURS, TIME_MAX_HOURS } from "./
 // which matters for a project meant to run out of the box.
 const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
-const SLIDER_STEPS = 1000;
+// 200 steps over a log time axis (H+1 .. H+7d): fine enough to drag smoothly,
+// coarse enough that a single arrow-key press is a perceptible move (the
+// reviewer found 1000 steps made keyboard nudges invisible).
+const SLIDER_STEPS = 200;
 
 // Fixed color per civil-defense dose-rate band, brightest/most alarming for
 // the highest band. RGBA, deck.gl convention.

@@ -10,7 +10,33 @@ body {
   color: #1a1a1a;
 }
 
+/* Column layout so #app fills the remaining space regardless of how many lines
+   the disclaimer wraps to (the old calc(100% - 2.2rem) assumed one line). */
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+/* Keyboard skip links: off-screen until focused. */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -3rem;
+  z-index: 20;
+  background: #1a4d2e;
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  text-decoration: none;
+  transition: top 0.15s;
+}
+.skip-link:focus {
+  top: 0.5rem;
+}
+
 #disclaimer {
+  flex: none;
   background: #7a1f1f;
   color: #fff;
   font-size: 0.8rem;
@@ -20,8 +46,9 @@ body {
 }
 
 #app {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  height: calc(100% - 2.2rem);
 }
 
 #panel {
@@ -214,6 +241,27 @@ button:disabled {
 
 #time-slider {
   width: 100%;
+  min-height: 44px; /* larger touch target */
+}
+
+/* Log-scale tick labels positioned at their true fractions along the slider. */
+.tick-labels {
+  position: relative;
+  height: 1em;
+  margin: 2px 0 4px;
+}
+.tick-labels span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  color: #667;
+  white-space: nowrap;
+}
+.tick-labels span:first-child {
+  transform: translateX(0);
+}
+.tick-labels span:last-child {
+  transform: translateX(-100%);
 }
 
 #legend {
@@ -258,4 +306,54 @@ button:disabled {
   background: #fff4e0;
   border: 1px solid #e0b060;
   border-radius: 4px;
+}
+
+/* --- touch targets (>=44px effective hit areas) -------------------------- */
+.checkbox-row,
+.radio {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.checkbox-row input[type="checkbox"],
+.radio input[type="radio"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.preset-row .preset {
+  min-height: 44px;
+  min-width: 44px;
+}
+/* Enlarge MapLibre's default 29px zoom/compass buttons for touch. */
+.maplibregl-ctrl-group button {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+/* --- responsive: below ~700px, stack map on top of scrollable controls --- */
+@media (max-width: 700px) {
+  #app {
+    flex-direction: column;
+  }
+  #map {
+    order: -1; /* map on top even though the panel comes first in the DOM */
+    flex: 0 0 50dvh;
+    min-height: 240px;
+  }
+  #panel {
+    width: 100%;
+    flex: 1 1 auto;
+    border-right: none;
+    border-top: 1px solid #ddd;
+  }
+  /* Keep the primary action reachable while the controls scroll. */
+  #compute-btn {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    box-shadow: 0 -3px 8px rgba(0, 0, 0, 0.18);
+  }
 }
