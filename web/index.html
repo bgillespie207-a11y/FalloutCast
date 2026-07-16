@@ -16,12 +16,19 @@
         <h1>FalloutCast</h1>
         <p class="subtitle">Weather-driven fallout planning estimate</p>
 
-        <form id="plume-form">
-          <label class="checkbox-row exchange-toggle">
-            <input type="checkbox" id="exchange-mode" />
-            Curated target deck — max-single-source surface-burst envelope
-          </label>
+        <!-- Mode is a major state change (different inputs, different compute,
+        different map layers), so it's a top-level tab pair, not a checkbox
+        buried among the form fields (the UX review's finding). -->
+        <div class="mode-tabs" role="tablist" aria-label="Computation mode">
+          <button type="button" role="tab" id="tab-single" aria-selected="true">
+            Single location
+          </button>
+          <button type="button" role="tab" id="tab-exchange" aria-selected="false">
+            National envelope
+          </button>
+        </div>
 
+        <form id="plume-form">
           <div id="single-target-fields">
             <!-- step="any" throughout: a fixed decimal step (e.g. 0.01) makes
             the browser's native step-mismatch validation reject values like
@@ -151,7 +158,9 @@
             </label>
           </div>
           <p id="per-class-note" class="hint" hidden>
-            Envelope uses an attack <em>scenario</em>: assumed incoming yields per
+            Computes a max-single-source surface-burst fallout envelope across
+            the curated target deck.
+            The envelope uses an attack <em>scenario</em>: assumed incoming yields per
             target class (counterforce ~0.30 Mt, countervalue ~0.50 Mt) —
             illustrative attacker assumptions, not the target's own weapon.
             <strong>Surface bursts everywhere</strong> (a fallout-maximizing

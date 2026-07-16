@@ -122,7 +122,8 @@ const latInput = document.getElementById("lat") as HTMLInputElement;
 const lonInput = document.getElementById("lon") as HTMLInputElement;
 const zipInput = document.getElementById("zip") as HTMLInputElement;
 const zipLookupBtn = document.getElementById("zip-lookup-btn") as HTMLButtonElement;
-const exchangeModeCheckbox = document.getElementById("exchange-mode") as HTMLInputElement;
+const tabSingle = document.getElementById("tab-single") as HTMLButtonElement;
+const tabExchange = document.getElementById("tab-exchange") as HTMLButtonElement;
 const singleTargetFields = document.getElementById("single-target-fields") as HTMLElement;
 const globalYieldFields = document.getElementById("global-yield-fields") as HTMLElement;
 const perClassNote = document.getElementById("per-class-note") as HTMLElement;
@@ -269,7 +270,7 @@ function ensureMapReady(): Promise<void> {
 // No-op in exchange mode: there's no single ground zero to set (the
 // envelope covers all public targets at once).
 map.on("click", (e) => {
-  if (exchangeModeCheckbox.checked) return;
+  if (exchangeMode) return;
   latInput.value = e.lngLat.lat.toFixed(4);
   lonInput.value = e.lngLat.lng.toFixed(4);
 });
@@ -292,7 +293,7 @@ manualWindCheckbox.addEventListener("change", () => {
 // left visible but documented as ignored (see the fieldset hint).
 
 function updateComputeButtonText(): void {
-  if (exchangeModeCheckbox.checked) {
+  if (exchangeMode) {
     computeBtn.textContent = "Compute national envelope";
   } else if (ensembleModeCheckbox.checked) {
     computeBtn.textContent = "Compute uncertainty band";
@@ -397,24 +398,44 @@ async function lookupZip(): Promise<void> {
   }
 }
 
-// --- full nuclear exchange toggle --------------------------------------------
+// --- mode tabs: single location vs national envelope --------------------------
 // /exchange/envelope has no per-target lat/lon/tier -- it always runs Tier-0
 // (WSEG-10) across the fixed public target set (see targets.py) and returns
 // one composited CONUS grid. So single-target fields are hidden, not just
-// ignored, while this is checked.
+// ignored, while the National-envelope tab is active.
 
-exchangeModeCheckbox.addEventListener("change", () => {
+let exchangeMode = false;
+
+function setMode(exchange: boolean): void {
+  if (exchange === exchangeMode) return;
+  exchangeMode = exchange;
   newComputeToken(); // invalidate any in-flight compute for the previous mode
-  singleTargetFields.hidden = exchangeModeCheckbox.checked;
+  tabSingle.setAttribute("aria-selected", String(!exchange));
+  tabExchange.setAttribute("aria-selected", String(exchange));
+  singleTargetFields.hidden = exchange;
   // Global yield/fission drive only the single-plume view; the envelope uses
   // per-target-class yields server-side, so swap the input for a summary note.
-  globalYieldFields.hidden = exchangeModeCheckbox.checked;
-  perClassNote.hidden = !exchangeModeCheckbox.checked;
+  globalYieldFields.hidden = exchange;
+  perClassNote.hidden = !exchange;
   updateComputeButtonText();
   statusEl.textContent = "";
   statusEl.classList.remove("error");
   clearResults();
-});
+}
+
+tabSingle.addEventListener("click", () => setMode(false));
+tabExchange.addEventListener("click", () => setMode(true));
+// Standard tablist keyboard pattern: arrow keys move between the two tabs.
+for (const tab of [tabSingle, tabExchange]) {
+  tab.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const other = tab === tabSingle ? tabExchange : tabSingle;
+      other.focus();
+      other.click();
+    }
+  });
+}
 
 async function computePlume(): Promise<void> {
   // Reset the status region to a polite progress announcer, and mark the
@@ -423,7 +444,7 @@ async function computePlume(): Promise<void> {
   statusEl.setAttribute("aria-live", "polite");
   computeBtn.setAttribute("aria-busy", "true");
   try {
-    if (exchangeModeCheckbox.checked) {
+    if (exchangeMode) {
       await computeExchangeEnvelope();
     } else if (ensembleModeCheckbox.checked) {
       await computeEnsembleBand();
@@ -718,9 +739,7 @@ function readUrlState(): void {
   setIfFinite(yieldInput, "yield_mt");
   setIfFinite(ffInput, "ff");
   if (params.get("mode") === "exchange") {
-    exchangeModeCheckbox.checked = true;
-    // Reuse the change handler to hide single-target fields etc.
-    exchangeModeCheckbox.dispatchEvent(new Event("change"));
+    setMode(true);
     return;
   }
   setIfFinite(latInput, "lat");
