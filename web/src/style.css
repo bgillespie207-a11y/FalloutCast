@@ -279,6 +279,14 @@ button:disabled {
   padding: 0.25rem 0.2rem;
   font-size: 0.72rem;
   background: #666;
+  border: 2px solid transparent;
+}
+
+/* Persistent selected state for the preset matching the current yield. */
+.preset-row .preset[aria-pressed="true"] {
+  background: #1a4d2e;
+  border-color: #0d2617;
+  font-weight: 700;
 }
 
 #manual-wind-fields {

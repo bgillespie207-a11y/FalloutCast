@@ -387,12 +387,28 @@ function manualWindFromForm(): ManualWind | null {
 }
 
 // --- yield presets --------------------------------------------------------------
+// The preset matching the current yield value stays visibly selected
+// (aria-pressed) -- previously a click gave no persistent feedback, and typing
+// a custom yield left a stale-looking highlight impossible; selection is
+// derived from the input value, so both stay in sync.
 
-for (const btn of document.querySelectorAll<HTMLButtonElement>(".preset")) {
+const presetButtons = [...document.querySelectorAll<HTMLButtonElement>(".preset")];
+
+function syncPresetSelection(): void {
+  const v = Number(yieldInput.value);
+  for (const btn of presetButtons) {
+    btn.setAttribute("aria-pressed", String(Number(btn.dataset.yield) === v));
+  }
+}
+
+for (const btn of presetButtons) {
   btn.addEventListener("click", () => {
     yieldInput.value = btn.dataset.yield ?? yieldInput.value;
+    syncPresetSelection();
   });
 }
+yieldInput.addEventListener("input", syncPresetSelection);
+syncPresetSelection();
 
 // --- ZIP code lookup ---------------------------------------------------------
 
@@ -786,6 +802,7 @@ function readUrlState(): void {
 }
 
 readUrlState();
+syncPresetSelection(); // a restored ?yield_mt may (de)select a preset
 
 function describeWind(resp: PlumeResponse): string {
   const w = resp.wind;
