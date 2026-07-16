@@ -350,6 +350,7 @@ function clearResults(): void {
   exportGeoJson = null;
   notesEl.innerHTML = "";
   legendEl.innerHTML = "";
+  clearContourTable();
   timeControl.hidden = true;
   exportBtn.hidden = true;
   overviewBtn.hidden = true;
@@ -634,7 +635,7 @@ async function computeEnsembleBand(): Promise<void> {
 
     statusEl.textContent = `P(H+1 dose rate ≥ ${resp.level_rhr} R/hr) across ${resp.n_members} members.`;
     renderPlainNotes(resp.notes);
-    renderEnsembleContours(resp.contours);
+    renderEnsembleContours(resp.contours, resp.ground_zero);
     exportGeoJson = resp.contours;
     exportBtn.hidden = false;
     overviewBtn.hidden = false;
@@ -965,13 +966,29 @@ function renderStaticContours(fc: GeoJsonFeatureCollection): void {
 // --- ensemble uncertainty bands ---------------------------------------------
 // Exceedance-probability contours (10/50/90%): nested lines from faint outer
 // edge to saturated core, inner (more-likely) bands drawn thicker.
-function renderEnsembleContours(fc: GeoJsonFeatureCollection): void {
+function renderEnsembleContours(fc: GeoJsonFeatureCollection, gz: [number, number]): void {
   const widthExpr = ["+", 2, ["*", 3, ["to-number", ["get", "exceedance_probability"], 0.5]]];
   setContours(fc, colorMatchExpr("exceedance_probability", PROB_COLORS), widthExpr);
   const probs = [...new Set(fc.features.map((f) => f.properties.exceedance_probability))].sort(
     (a, b) => a - b,
   );
   renderEnsembleLegend(probs);
+
+  const rows: ContourRow[] = [];
+  for (const p of probs) {
+    const far = farthestPoint(
+      fc.features.filter((f) => f.properties.exceedance_probability === p),
+      gz,
+    );
+    if (far) {
+      rows.push({
+        swatch: PROB_COLORS[p] ?? [255, 255, 255, 200],
+        label: `${(p * 100).toFixed(0)}% band`,
+        ...far,
+      });
+    }
+  }
+  renderContourTable("Probability-band reach (H+1)", rows);
 }
 
 function renderEnsembleLegend(probs: number[]): void {
@@ -1029,6 +1046,24 @@ function renderAtCurrentTime(): void {
   setContours(displayed, colorMatchExpr("display_level_rhr", LEVEL_COLORS), 3);
 
   renderLegend(picks.map((p) => p.displayLevel));
+
+  const gz = currentPlume.ground_zero;
+  const rows: ContourRow[] = [];
+  for (const pick of picks) {
+    const far = farthestPoint(
+      features.filter((f) => f.properties.display_level_rhr === pick.displayLevel),
+      gz,
+    );
+    if (far) {
+      rows.push({
+        swatch: LEVEL_COLORS[pick.displayLevel] ?? [255, 255, 255, 200],
+        label: `${pick.displayLevel} R/hr`,
+        ...far,
+      });
+    }
+  }
+  renderContourTable(`Contour reach at ${timeLabel.textContent}`, rows);
+
   exportGeoJson = displayed;
 }
 
@@ -1085,6 +1120,122 @@ function renderTargetLegend(): void {
 function formatHours(hours: number): string {
   if (hours < 48) return `H+${hours.toFixed(1)}h`;
   return `H+${(hours / 24).toFixed(1)}d`;
+}
+
+// --- persistent contour table -------------------------------------------------
+// A numeric readout of each rendered band: how far its contour reaches from
+// ground zero and in which compass direction. The map alone encoded results in
+// color + hover popups only (the UX review's finding). Shown for the single-
+// plume and ensemble views; the national envelope has no single ground zero,
+// so reach-from-GZ is meaningless there and no table is rendered.
+
+const contourTableEl = document.getElementById("contour-table") as HTMLDivElement;
+
+const EARTH_RADIUS_KM = 6371;
+const DEG = Math.PI / 180;
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLat = (lat2 - lat1) * DEG;
+  const dLon = (lon2 - lon1) * DEG;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * DEG) * Math.cos(lat2 * DEG) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a));
+}
+
+function initialBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const y = Math.sin((lon2 - lon1) * DEG) * Math.cos(lat2 * DEG);
+  const x =
+    Math.cos(lat1 * DEG) * Math.sin(lat2 * DEG) -
+    Math.sin(lat1 * DEG) * Math.cos(lat2 * DEG) * Math.cos((lon2 - lon1) * DEG);
+  return (Math.atan2(y, x) / DEG + 360) % 360;
+}
+
+const COMPASS_16 = [
+  "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+];
+function compassName(bearing: number): string {
+  return COMPASS_16[Math.round(bearing / 22.5) % 16];
+}
+
+/** Farthest vertex of the given contour features from ground zero (gz is
+ * [lon, lat], GeoJSON order). Null if the features have no coordinates. */
+function farthestPoint(
+  features: GeoJsonFeatureCollection["features"],
+  gz: [number, number],
+): { km: number; bearing: number } | null {
+  let best: { km: number; bearing: number } | null = null;
+  const visit = (coords: unknown): void => {
+    if (typeof (coords as number[])[0] === "number" && (coords as number[]).length >= 2) {
+      const [lon, lat] = coords as number[];
+      const km = haversineKm(gz[1], gz[0], lat, lon);
+      if (!best || km > best.km) {
+        best = { km, bearing: initialBearingDeg(gz[1], gz[0], lat, lon) };
+      }
+    } else if (Array.isArray(coords)) {
+      for (const c of coords) visit(c);
+    }
+  };
+  for (const f of features) visit(f.geometry.coordinates);
+  return best;
+}
+
+function formatReach(km: number): string {
+  const mi = km * 0.621371;
+  const f = (v: number) => (v >= 10 ? v.toFixed(0) : v.toFixed(1));
+  return `${f(km)} km (${f(mi)} mi)`;
+}
+
+interface ContourRow {
+  swatch: [number, number, number, number];
+  label: string;
+  km: number;
+  bearing: number;
+}
+
+function renderContourTable(caption: string, rows: ContourRow[]): void {
+  contourTableEl.innerHTML = "";
+  if (rows.length === 0) return;
+  const table = document.createElement("table");
+  const cap = document.createElement("caption");
+  cap.textContent = caption;
+  table.appendChild(cap);
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const h of ["Band", "Max reach from GZ", "Toward"]) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = h;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const bandCell = document.createElement("td");
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    const [r, g, b] = row.swatch;
+    swatch.style.background = `rgb(${r},${g},${b})`;
+    bandCell.appendChild(swatch);
+    bandCell.appendChild(document.createTextNode(` ${row.label}`));
+    tr.appendChild(bandCell);
+    const reachCell = document.createElement("td");
+    reachCell.textContent = formatReach(row.km);
+    tr.appendChild(reachCell);
+    const dirCell = document.createElement("td");
+    dirCell.textContent = `${compassName(row.bearing)} (${Math.round(row.bearing)}°)`;
+    tr.appendChild(dirCell);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  contourTableEl.appendChild(table);
+}
+
+function clearContourTable(): void {
+  contourTableEl.innerHTML = "";
 }
 
 // --- GeoJSON export ----------------------------------------------------------
