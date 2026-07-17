@@ -85,22 +85,26 @@ fixed: the overlay setup now retries at compute time if the style finished
 loading after the last styledata event, e.g. in a background tab.)
 
 ### #23 — SME / domain features
-- **Arrival time + cumulative dose** distinct from H+1 rate. Backend already has
-  `POST /dose` (Way-Wigner accumulated dose) and `WSEG10.time_of_arrival()` —
-  needs a frontend surface (e.g. click a point → show arrival, peak rate,
-  integrated dose over a shelter window).
-- **Shelter / protection-factor** scenarios (divide dose by PF) with strong
-  non-operational disclaimers.
-- **Weather age / refresh**: `valid_time`, `retrieved_at`, `age_seconds` are
-  already returned (`weather` on the envelope response, and `openmeteo`
-  provenance) — add a visible timestamp + a manual refresh control.
+
+**Done 2026-07-17** (see git log for the commits):
+- Arrival time + cumulative dose: new `POST /exposure` (exposure.py, 8 offline
+  tests) + click-to-inspect panel (click the map while a Tier-0 plume is shown).
+- Shelter / protection-factor: PF selector (1/10/100, labeled illustrative) in
+  that panel; doses divided server-side, disclaimers rendered verbatim.
+- Weather age / refresh: `weather` provenance now also on /plume responses; UI
+  line (model · valid hour · fetch age) + "Refresh winds" button;
+  `force_refresh=true` on the envelope busts the per-hour wind cache.
+- Uncertainty explainer: "How to read these bands" under the ensemble legend.
+- Distance scale: mi + km ScaleControls bottom-left.
+- Shareable links: URL state covers manual wind and ensemble mode
+  (`?mode=ensemble&level=&members=`, `wind=speed,bearing,shear`) + a
+  "Copy scenario link" button with a no-clipboard fallback.
+
+**Remaining:**
 - **Wind arrows / altitude-profile** viz (the profile is fetched in `openmeteo`).
-- **Metric/US unit switch** (miles↔km, R↔Sv-ish).
-- **Shareable scenario links** (URL already encodes some state via
-  `writeUrlState`/`readUrlState` in `main.ts` — extend, no sensitive data).
+- **Metric/US unit switch** (miles↔km, R↔Sv-ish). Several displays already show
+  both km and mi (contour table, exposure panel, scale bars).
 - **Place/address search** (currently only US ZIP via zippopotam + lat/lon).
-- **Uncertainty-explainer panel** for the 10/50/90% ensemble bands.
-- **Distance scale + distances from GZ** on the map.
 - **Richer exported report** (assumptions/versions/timestamps/units/limits) —
   the envelope export already carries weather/aggregation/yield_policy/deck
   version/in-excluded IDs; extend to a human-readable report and cover the
@@ -155,3 +159,14 @@ docs/
   recovery (setup retry in `ensureMapReady`) means computes succeed once the
   style JSON is in, even if the canvas can't paint until the tab is visible.
 - The frontend has **no unit-test suite** still (unchanged gap; #23 note).
+- **Compute-before-map-ready is a guarded path now**: the clear helpers
+  (`clearContours` etc.) are optional-chained because `map.getSource()` is
+  undefined until `setupMapOverlay` runs — an unguarded `.setData()` there
+  throws synchronously OUTSIDE the compute's try/finally and wedges the UI
+  (button disabled + spinner forever, no error). `ensureMapReady` also polls
+  the idempotent setup every 500 ms while waiting. Keep both properties if you
+  touch that code.
+- **Frozen/hidden browser-pane tabs also throttle timers** (not just rAF), so
+  elapsed tickers/timeouts lag there; `read_network_requests` does not record
+  the page's cross-origin :8010 fetches, and uvicorn only logs requests on
+  completion — check all three before concluding "no request was sent".
