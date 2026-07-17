@@ -5,7 +5,9 @@ Endpoints
 GET  /health              liveness
 GET  /targets             public CONUS strategic-site set
 POST /plume               single-detonation fallout contours
-POST /dose                time-evolution of exposure at a point
+POST /dose                time-evolution of exposure given a known H+1 rate
+POST /exposure            point assessment under a Tier-0 plume: arrival time,
+                          rates, windowed/lifetime doses, protection factor
 POST /ensemble             wind-ensemble dose-exceedance probability bands
 POST /exchange             multi-target overlay (N separate per-target plumes)
 POST /exchange/envelope    true national max-envelope dose surface (PRD.md M2):
@@ -24,7 +26,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from .. import contour, grid, scenario, targetdeck, targets as targets_mod
+from .. import contour, exposure, grid, scenario, targetdeck, targets as targets_mod
 from ..physics import decay, ensemble
 from ..physics import tier1
 from ..physics.wseg10 import WSEG10, cloud_top_height_m
@@ -38,6 +40,8 @@ from ..schemas import (
     ExchangeEnvelopeResponse,
     PlumeRequest,
     PlumeResponse,
+    PointExposureRequest,
+    PointExposureResponse,
     Target,
     TargetDeckMeta,
     WindUsed,
@@ -183,6 +187,21 @@ def dose(req: DoseRequest) -> DoseResponse:
         total_to_infinity_r=total_inf,
         notes=notes,
     )
+
+
+@app.post("/exposure", response_model=PointExposureResponse)
+def point_exposure(req: PointExposureRequest) -> PointExposureResponse:
+    """Exposure assessment at one map point under a Tier-0 (WSEG-10) plume.
+
+    Returns fallout arrival time (WSEG-10 time_of_arrival), the H+1 reference
+    and at-arrival dose rates, a decaying rate curve, and accumulated doses
+    over [arrival, exit_hours] and [arrival, infinity) -- each also divided by
+    the requested protection factor. The effective wind must be supplied (echo
+    the wind from the /plume response); nothing is fetched, so the result is
+    exactly consistent with the plume already rendered. Tier-1 has no
+    time-of-arrival, so this is Tier-0 only.
+    """
+    return exposure.assess(req)
 
 
 @app.post("/ensemble", response_model=EnsembleResponse)

@@ -118,6 +118,52 @@ class DoseResponse(BaseModel):
     notes: list[str] = []
 
 
+class PointExposureRequest(BaseModel):
+    """Exposure assessment at one map point under a Tier-0 (WSEG-10) plume.
+
+    The effective wind is REQUIRED and never fetched here: callers echo back
+    the wind a /plume response reported, so the assessment is exactly
+    consistent with the contours already on screen (same model, same wind --
+    no second live fetch that could silently disagree). Tier-1 has no
+    time-of-arrival, so this endpoint is Tier-0 only.
+    """
+
+    lat: float = Field(ge=-90, le=90, description="ground zero latitude")
+    lon: float = Field(ge=-180, le=180, description="ground zero longitude")
+    yield_mt: float = Field(gt=0)
+    fission_fraction: float = Field(gt=0, le=1.0, default=0.5)
+    wind: ManualWind
+    point_lat: float = Field(ge=-90, le=90, description="assessment point latitude")
+    point_lon: float = Field(ge=-180, le=180, description="assessment point longitude")
+    exit_hours: Optional[float] = Field(
+        default=None, gt=0, description="end of the exposure window, hours after burst"
+    )
+    protection_factor: float = Field(
+        default=1.0, ge=1.0, le=10000,
+        description="shielding divisor: dose inside = outdoor dose / PF",
+    )
+
+
+class PointExposureResponse(BaseModel):
+    point: list[float]  # [lon, lat]
+    distance_miles: float
+    bearing_from_gz_deg: float          # compass bearing GZ -> point
+    arrival_hours: float                # WSEG-10 time of arrival (clamped >= 0.5)
+    dose_rate_h1_rhr: float             # H+1 reference rate at the point, unshielded
+    rate_at_arrival_rhr: float          # Way-Wigner rate at the arrival time, unshielded
+    rate_curve: list[DoseSample] = []   # unshielded outdoor rates at times >= arrival
+    protection_factor: float
+    # Doses over [arrival, exit_hours] (None when exit_hours not given). Zero
+    # when the window closes before fallout arrives.
+    unsheltered_dose_window_r: Optional[float] = None
+    sheltered_dose_window_r: Optional[float] = None
+    # Doses over [arrival, infinity): staying exposed indefinitely.
+    unsheltered_dose_to_infinity_r: float
+    sheltered_dose_to_infinity_r: float
+    disclaimer: str
+    notes: list[str] = []
+
+
 class EnsembleRequest(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
