@@ -947,8 +947,14 @@ function readUrlState(): void {
   }
 }
 
-readUrlState();
-syncPresetSelection(); // a restored ?yield_mt may (de)select a preset
+// NOTE: readUrlState() is deliberately invoked at the very BOTTOM of this
+// module, not here next to its definition. A ?mode=exchange URL makes it call
+// setMode -> clearResults, which touches module-level `let`s declared further
+// down (exportGeoJson, and transitively contourTableEl/deckMeta). Calling it
+// mid-file threw a TDZ ReferenceError that silently ABORTED the rest of
+// module evaluation -- the page looked alive (earlier listeners were wired)
+// but every later initializer was dead, and the envelope compute then failed
+// with "Cannot access 'deckMeta' before initialization".
 
 function describeWind(resp: PlumeResponse): string {
   const w = resp.wind;
@@ -1620,3 +1626,10 @@ setDisclaimer(
   "Compute a result to see the methodology and limitations specific to the selected model. " +
     "All outputs are planning estimates from simplified models, not operational predictions.",
 );
+
+// --- URL-state restore: MUST stay the last statements in this module -------
+// readUrlState -> setMode -> clearResults reaches most of the module's
+// mutable state; running it any earlier re-introduces the TDZ abort described
+// at the readUrlState definition.
+readUrlState();
+syncPresetSelection(); // a restored ?yield_mt may (de)select a preset
