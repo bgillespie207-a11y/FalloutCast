@@ -4,12 +4,14 @@ import {
   fetchPlume,
   fetchExchangeEnvelope,
   fetchEnsemble,
+  fetchExposure,
   fetchTargets,
   fetchDeck,
   geocodeZip,
   ApiError,
   type ManualWind,
   type PlumeResponse,
+  type PointExposureResponse,
   type GeoJsonFeatureCollection,
   type TargetDeckMeta,
 } from "./api";
@@ -161,6 +163,14 @@ overviewBtn.addEventListener("click", () => returnToOverview());
 const notesEl = document.getElementById("notes") as HTMLDivElement;
 const disclaimerToggle = document.getElementById("disclaimer-toggle") as HTMLButtonElement;
 const disclaimerFullEl = document.getElementById("disclaimer-full") as HTMLDivElement;
+const exposureSection = document.getElementById("exposure") as HTMLElement;
+const exposureCloseBtn = document.getElementById("exposure-close") as HTMLButtonElement;
+const exposureSummaryEl = document.getElementById("exposure-summary") as HTMLDivElement;
+const exposureExitSelect = document.getElementById("exposure-exit") as HTMLSelectElement;
+const exposurePfSelect = document.getElementById("exposure-pf") as HTMLSelectElement;
+const exposureDosesEl = document.getElementById("exposure-doses") as HTMLDivElement;
+const exposureSetGzBtn = document.getElementById("exposure-set-gz") as HTMLButtonElement;
+const exposureNotesEl = document.getElementById("exposure-notes") as HTMLDivElement;
 
 timeSlider.max = String(SLIDER_STEPS);
 
@@ -189,6 +199,22 @@ new ResizeObserver(() => map.resize()).observe(document.getElementById("map") as
 
 let gzMarker: maplibregl.Marker | null = null;
 let currentPlume: PlumeResponse | null = null;
+
+// Point-exposure inspection state. inspectContext is non-null only while a
+// Tier-0 plume (whose effective wind is known numerically) is on screen; it
+// carries exactly the parameters that plume was computed with, so /exposure
+// evaluates the same model the map is showing.
+interface InspectContext {
+  gzLat: number;
+  gzLon: number;
+  yieldMt: number;
+  ff: number;
+  wind: ManualWind;
+}
+let inspectContext: InspectContext | null = null;
+let inspectPoint: { lat: number; lon: number } | null = null;
+let inspectMarker: maplibregl.Marker | null = null;
+let inspectSeq = 0; // discard out-of-order /exposure responses
 
 // Surface render/graphics failures instead of letting them fail silently while
 // the UI reports success (the review's finding). A lost WebGL context or a
@@ -284,11 +310,20 @@ function ensureMapReady(): Promise<void> {
   return Promise.race([mapReady, timeout]);
 }
 
-// Click the map to set ground zero -- friendlier than typing coordinates.
-// No-op in exchange mode: there's no single ground zero to set (the
-// envelope covers all public targets at once).
+// Map clicks do double duty:
+//   * no single-plume result on screen -> set ground zero (friendlier than
+//     typing coordinates);
+//   * a Tier-0 plume IS on screen -> assess exposure at the clicked point
+//     (the panel offers "Set as new ground zero" so that flow stays one
+//     click away).
+// No-op in exchange mode: there's no single ground zero to set (the envelope
+// covers all public targets at once).
 map.on("click", (e) => {
   if (exchangeMode) return;
+  if (inspectContext && currentPlume) {
+    void inspectExposure(e.lngLat.lat, e.lngLat.lng);
+    return;
+  }
   latInput.value = e.lngLat.lat.toFixed(4);
   lonInput.value = e.lngLat.lng.toFixed(4);
 });
@@ -353,6 +388,8 @@ function clearResults(): void {
   clearTargetMarkers();
   clearFieldPolygons();
   clearGzMarker();
+  closeExposure();
+  inspectContext = null;
   currentPlume = null;
   exportGeoJson = null;
   notesEl.innerHTML = "";
@@ -610,6 +647,8 @@ async function computeEnsembleBand(): Promise<void> {
   timeControl.hidden = true; // probability band has no decay slider
   exportBtn.hidden = true;
   currentPlume = null;
+  closeExposure();
+  inspectContext = null;
   clearTargetMarkers();
 
   const level = Number(ensembleLevelInput.value);
@@ -667,18 +706,22 @@ async function computeSinglePlume(): Promise<void> {
 
   const tierInput = form.querySelector<HTMLInputElement>('input[name="tier"]:checked');
   const tier = tierInput ? (Number(tierInput.value) as 0 | 1) : 0;
+  closeExposure(); // any open panel refers to the previous plume
+  inspectContext = null;
 
   try {
     const wind = manualWindFromForm();
     const { lat, lon } = readGroundZero();
+    const yieldMt = Number(yieldInput.value);
+    const ff = Number(ffInput.value);
     await ensureMapReady();
     startElapsed(manualWindCheckbox.checked ? "Computing (manual wind)" : "Computing (fetches live wind)");
     const resp = await withTimeout(
       fetchPlume({
         lat,
         lon,
-        yield_mt: Number(yieldInput.value),
-        fission_fraction: Number(ffInput.value),
+        yield_mt: yieldMt,
+        fission_fraction: ff,
         tier,
         ...(wind ? { wind } : {}),
         levels_rhr: fetchLevelSet(),
@@ -691,7 +734,28 @@ async function computeSinglePlume(): Promise<void> {
     setDisclaimer(resp.disclaimer);
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
-    statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}`;
+    // Enable click-to-inspect when the effective wind is known numerically
+    // (Tier 0, fetched or manual). Tier 1 has no time-of-arrival to assess.
+    if (
+      resp.tier_used === 0 &&
+      resp.wind.speed_mph != null &&
+      resp.wind.bearing_deg != null
+    ) {
+      inspectContext = {
+        gzLat: resp.ground_zero[1],
+        gzLon: resp.ground_zero[0],
+        yieldMt,
+        ff,
+        wind: {
+          speed_mph: resp.wind.speed_mph,
+          bearing_deg: resp.wind.bearing_deg,
+          shear_mph_per_kft: resp.wind.shear_mph_per_kft ?? 0,
+        },
+      };
+    }
+
+    const inspectHint = inspectContext ? " Click the map to assess a point." : "";
+    statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}.${inspectHint}`;
     renderNotes(resp);
     timeControl.hidden = false;
     exportBtn.hidden = false;
@@ -1243,6 +1307,130 @@ function renderContourTable(caption: string, rows: ContourRow[]): void {
 
 function clearContourTable(): void {
   contourTableEl.innerHTML = "";
+}
+
+// --- point-exposure panel -----------------------------------------------------
+// Click a point while a Tier-0 plume is shown -> POST /exposure with the SAME
+// parameters/wind that plume used -> arrival time, rates, and windowed/
+// lifetime doses (optionally divided by an assumed protection factor).
+
+const MI_TO_KM = 1.609344;
+
+function fmtNum(v: number): string {
+  if (v >= 100) return v.toFixed(0);
+  if (v >= 10) return v.toFixed(1);
+  if (v >= 0.01) return v.toPrecision(2);
+  if (v === 0) return "0";
+  return v.toExponential(1);
+}
+
+function closeExposure(): void {
+  exposureSection.hidden = true;
+  inspectPoint = null;
+  inspectSeq++; // any in-flight assessment is now stale
+  if (inspectMarker) {
+    inspectMarker.remove();
+    inspectMarker = null;
+  }
+}
+
+exposureCloseBtn.addEventListener("click", closeExposure);
+
+exposureSetGzBtn.addEventListener("click", () => {
+  if (!inspectPoint) return;
+  latInput.value = inspectPoint.lat.toFixed(4);
+  lonInput.value = inspectPoint.lon.toFixed(4);
+  closeExposure();
+  statusEl.textContent =
+    "Ground zero inputs updated from the inspected point — Compute to rerun.";
+});
+
+// Changing the stay window or PF re-assesses the same point (cheap: the
+// backend recomputes analytically, no weather fetch).
+for (const sel of [exposureExitSelect, exposurePfSelect]) {
+  sel.addEventListener("change", () => {
+    if (inspectPoint) void inspectExposure(inspectPoint.lat, inspectPoint.lon);
+  });
+}
+
+async function inspectExposure(lat: number, lon: number): Promise<void> {
+  if (!inspectContext) return;
+  const ctx = inspectContext;
+  const seq = ++inspectSeq;
+  inspectPoint = { lat, lon };
+
+  if (inspectMarker) inspectMarker.remove();
+  inspectMarker = new maplibregl.Marker({ color: "#33506b", scale: 0.8 })
+    .setLngLat([lon, lat])
+    .addTo(map);
+
+  exposureSection.hidden = false;
+  exposureSummaryEl.textContent = "Assessing…";
+  exposureDosesEl.textContent = "";
+  exposureNotesEl.textContent = "";
+
+  try {
+    const resp = await fetchExposure({
+      lat: ctx.gzLat,
+      lon: ctx.gzLon,
+      yield_mt: ctx.yieldMt,
+      fission_fraction: ctx.ff,
+      wind: ctx.wind,
+      point_lat: lat,
+      point_lon: lon,
+      exit_hours: Number(exposureExitSelect.value),
+      protection_factor: Number(exposurePfSelect.value),
+    });
+    if (seq !== inspectSeq) return; // superseded by a newer click / closed
+    renderExposure(resp);
+  } catch (err) {
+    if (seq !== inspectSeq) return;
+    const msg = err instanceof ApiError ? err.message : String(err);
+    exposureSummaryEl.textContent = `Assessment failed: ${msg}`;
+  }
+}
+
+function renderExposure(resp: PointExposureResponse): void {
+  const km = resp.distance_miles * MI_TO_KM;
+  const dir = `${compassName(resp.bearing_from_gz_deg)} (${Math.round(resp.bearing_from_gz_deg)}°)`;
+
+  const lines: string[] = [
+    `${formatReach(km)} ${dir} of ground zero.`,
+  ];
+  if (resp.dose_rate_h1_rhr < 1e-3) {
+    lines.push(
+      "Effectively outside the modeled deposition pattern (H+1 rate below 0.001 R/hr).",
+    );
+    exposureSummaryEl.innerText = lines.join("\n");
+    exposureDosesEl.textContent = "";
+    exposureNotesEl.innerText = resp.notes.join("\n\n");
+    return;
+  }
+
+  lines.push(
+    `Fallout arrival: ~H+${resp.arrival_hours.toFixed(1)} h.`,
+    `Outdoor dose rate: ${fmtNum(resp.dose_rate_h1_rhr)} R/hr at H+1 reference · ` +
+      `${fmtNum(resp.rate_at_arrival_rhr)} R/hr when fallout arrives.`,
+  );
+  exposureSummaryEl.innerText = lines.join("\n");
+
+  const exitLabel = exposureExitSelect.selectedOptions[0]?.textContent?.trim() ?? "exit";
+  const pf = resp.protection_factor;
+  const doseLines: string[] = [];
+  if (resp.unsheltered_dose_window_r != null) {
+    doseLines.push(
+      `Outdoors from arrival until ${exitLabel}: ${fmtNum(resp.unsheltered_dose_window_r)} R`,
+    );
+    if (pf > 1 && resp.sheltered_dose_window_r != null) {
+      doseLines.push(`Same window behind PF ${pf}: ${fmtNum(resp.sheltered_dose_window_r)} R`);
+    }
+  }
+  doseLines.push(
+    `Outdoors indefinitely from arrival: ${fmtNum(resp.unsheltered_dose_to_infinity_r)} R` +
+      (pf > 1 ? ` (PF ${pf}: ${fmtNum(resp.sheltered_dose_to_infinity_r)} R)` : ""),
+  );
+  exposureDosesEl.innerText = doseLines.join("\n");
+  exposureNotesEl.innerText = resp.notes.join("\n\n");
 }
 
 // --- GeoJSON export ----------------------------------------------------------

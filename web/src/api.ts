@@ -92,6 +92,47 @@ export interface ExchangeEnvelopeResponse {
   contours: GeoJsonFeatureCollection;
 }
 
+export interface DoseSample {
+  t_hours: number;
+  dose_rate_rhr: number;
+}
+
+// Point assessment under a Tier-0 plume. `wind` echoes the effective wind the
+// /plume response reported, so the backend evaluates the SAME model the map is
+// showing (no second live fetch that could disagree).
+export interface PointExposureRequest {
+  lat: number; // ground zero
+  lon: number;
+  yield_mt: number;
+  fission_fraction: number;
+  wind: ManualWind;
+  point_lat: number;
+  point_lon: number;
+  exit_hours?: number;
+  protection_factor?: number;
+}
+
+export interface PointExposureResponse {
+  point: [number, number]; // [lon, lat]
+  distance_miles: number;
+  bearing_from_gz_deg: number;
+  arrival_hours: number;
+  dose_rate_h1_rhr: number;
+  rate_at_arrival_rhr: number;
+  rate_curve: DoseSample[];
+  protection_factor: number;
+  unsheltered_dose_window_r: number | null;
+  sheltered_dose_window_r: number | null;
+  unsheltered_dose_to_infinity_r: number;
+  sheltered_dose_to_infinity_r: number;
+  disclaimer: string;
+  notes: string[];
+}
+
+export function fetchExposure(req: PointExposureRequest): Promise<PointExposureResponse> {
+  return postJson<PointExposureResponse>("/exposure", req);
+}
+
 export interface EnsembleRequest {
   lat: number;
   lon: number;

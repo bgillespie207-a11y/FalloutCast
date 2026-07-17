@@ -274,6 +274,42 @@
         encodes results in color + hover only (UX review). -->
         <div id="contour-table"></div>
 
+        <!-- Point-exposure panel (backlog #23): after a Tier-0 plume is
+        computed, clicking the map assesses that point via POST /exposure --
+        arrival time, rates, and windowed/lifetime doses with an optional
+        protection factor. Hidden until a point is clicked. -->
+        <section id="exposure" hidden aria-label="Point exposure">
+          <div class="exposure-head">
+            <h2>Point exposure</h2>
+            <button type="button" id="exposure-close" aria-label="Close point exposure">
+              ✕
+            </button>
+          </div>
+          <div id="exposure-summary"></div>
+          <div class="exposure-controls">
+            <label
+              >Exposed until
+              <select id="exposure-exit">
+                <option value="24">H+24 hours</option>
+                <option value="48" selected>H+48 hours</option>
+                <option value="168">1 week (H+168)</option>
+                <option value="336">2 weeks (H+336)</option>
+              </select>
+            </label>
+            <label
+              >Protection factor
+              <select id="exposure-pf">
+                <option value="1" selected>1 — unsheltered</option>
+                <option value="10">10 — illustrative</option>
+                <option value="100">100 — illustrative</option>
+              </select>
+            </label>
+          </div>
+          <div id="exposure-doses"></div>
+          <button type="button" id="exposure-set-gz">Set as new ground zero</button>
+          <div id="exposure-notes" class="hint"></div>
+        </section>
+
         <div class="result-actions">
           <button type="button" id="overview-btn" hidden>Return to overview</button>
           <button type="button" id="export-btn" hidden>Download GeoJSON</button>
