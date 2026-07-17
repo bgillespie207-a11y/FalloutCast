@@ -297,21 +297,30 @@ setupMapOverlay(); // in case the style is already loaded synchronously (cached)
 // `await mapReady` alone could hang the "Computing..." status forever if the
 // style never loads (dead connection) -- fail loudly after a timeout. This
 // timeout is now rare: it waits only for the STYLE, not for basemap tiles.
-function ensureMapReady(): Promise<void> {
-  if (mapSetupDone) return Promise.resolve();
-  // Retry the (idempotent) setup here: styledata can fire while the tab is
-  // hidden with isStyleLoaded() still false (rAF is paused in background
-  // tabs, so MapLibre's load sequence stalls mid-way). Without this, setup
-  // never re-runs after the style finishes and every compute times out.
+async function ensureMapReady(): Promise<void> {
+  if (mapSetupDone) return;
+  // Keep retrying the (idempotent) setup while we wait: styledata can fire
+  // while the tab is hidden with isStyleLoaded() still false (rAF is paused
+  // in background tabs, so MapLibre's load sequence stalls mid-way), and no
+  // later event re-runs setup once the style eventually finishes. A one-shot
+  // retry at call time is not enough -- the style may finish loading AFTER
+  // the compute started. Interval callbacks are throttled in hidden tabs,
+  // but whenever one does fire with the style ready, setup completes and
+  // resolves mapReady.
   setupMapOverlay();
-  if (mapSetupDone) return Promise.resolve();
+  if (mapSetupDone) return;
+  const poll = window.setInterval(setupMapOverlay, 500);
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(
       () => reject(new ApiError("Map style failed to load. Check your connection and reload.")),
       20000,
     ),
   );
-  return Promise.race([mapReady, timeout]);
+  try {
+    await Promise.race([mapReady, timeout]);
+  } finally {
+    clearInterval(poll);
+  }
 }
 
 // Map clicks do double duty:
@@ -947,8 +956,16 @@ function setContours(
   map.setPaintProperty(CONTOUR_LAYER, "line-width", widthExpr as number);
 }
 
+// The clear helpers run outside ensureMapReady (mode switches, the guard
+// section at the top of every compute), so the overlay sources may not be
+// installed yet -- e.g. compute clicked while the style is still loading.
+// getSource() then returns undefined, and an unguarded .setData() throws
+// SYNCHRONOUSLY before the compute's try/finally, wedging the UI with the
+// button disabled and the busy spinner on forever (reproduced live).
 function clearContours(): void {
-  contourSource().setData(EMPTY_FC as GeoJSON.FeatureCollection);
+  (map.getSource(CONTOUR_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
+    EMPTY_FC as GeoJSON.FeatureCollection,
+  );
 }
 
 async function plotTargetMarkers(): Promise<void> {
@@ -965,8 +982,13 @@ async function plotTargetMarkers(): Promise<void> {
 }
 
 function clearTargetMarkers(): void {
-  targetSource().setData(EMPTY_FC as GeoJSON.FeatureCollection);
-  (map.getSource(FIELD_SOURCE) as maplibregl.GeoJSONSource).setData(EMPTY_FC as GeoJSON.FeatureCollection);
+  // Optional-chained for the same reason as clearContours.
+  (map.getSource(TARGET_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
+    EMPTY_FC as GeoJSON.FeatureCollection,
+  );
+  (map.getSource(FIELD_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
+    EMPTY_FC as GeoJSON.FeatureCollection,
+  );
 }
 
 // The versioned deck metadata + documented field footprints. Kept so the
