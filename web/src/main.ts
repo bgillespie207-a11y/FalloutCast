@@ -161,6 +161,18 @@ const legendEl = document.getElementById("legend") as HTMLDivElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const overviewBtn = document.getElementById("overview-btn") as HTMLButtonElement;
 overviewBtn.addEventListener("click", () => returnToOverview());
+const shareBtn = document.getElementById("share-btn") as HTMLButtonElement;
+// The URL always reflects the last computed scenario (writeUrlState), so
+// sharing is just copying it. No sensitive data: mode, coords, yield, model
+// choice, and (if set) manual wind / ensemble knobs.
+shareBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    statusEl.textContent = "Scenario link copied to the clipboard.";
+  } catch {
+    statusEl.textContent = `Copy failed — share this URL: ${window.location.href}`;
+  }
+});
 const notesEl = document.getElementById("notes") as HTMLDivElement;
 const disclaimerToggle = document.getElementById("disclaimer-toggle") as HTMLButtonElement;
 const disclaimerFullEl = document.getElementById("disclaimer-full") as HTMLDivElement;
@@ -415,6 +427,7 @@ function clearResults(): void {
   renderWeather(null);
   timeControl.hidden = true;
   exportBtn.hidden = true;
+  shareBtn.hidden = true;
   overviewBtn.hidden = true;
 }
 
@@ -664,6 +677,7 @@ async function computeEnsembleBand(): Promise<void> {
   statusEl.classList.add("busy");
   timeControl.hidden = true; // probability band has no decay slider
   exportBtn.hidden = true;
+  shareBtn.hidden = true;
   currentPlume = null;
   closeExposure();
   inspectContext = null;
@@ -694,6 +708,7 @@ async function computeEnsembleBand(): Promise<void> {
     );
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
+    writeUrlState({ mode: "ensemble" });
     setDisclaimer(resp.disclaimer);
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
@@ -703,6 +718,7 @@ async function computeEnsembleBand(): Promise<void> {
     renderEnsembleContours(resp.contours, resp.ground_zero);
     exportGeoJson = resp.contours;
     exportBtn.hidden = false;
+    shareBtn.hidden = false;
     overviewBtn.hidden = false;
     fitToFeatures(resp.contours, [resp.ground_zero[0], resp.ground_zero[1]]);
   } catch (err) {
@@ -722,6 +738,7 @@ async function computeSinglePlume(): Promise<void> {
   statusEl.classList.add("busy");
   timeControl.hidden = true;
   exportBtn.hidden = true;
+  shareBtn.hidden = true;
 
   const tierInput = form.querySelector<HTMLInputElement>('input[name="tier"]:checked');
   const tier = tierInput ? (Number(tierInput.value) as 0 | 1) : 0;
@@ -779,6 +796,7 @@ async function computeSinglePlume(): Promise<void> {
     renderNotes(resp);
     timeControl.hidden = false;
     exportBtn.hidden = false;
+    shareBtn.hidden = false;
     overviewBtn.hidden = false;
     timeSlider.value = "0";
     renderAtCurrentTime();
@@ -800,6 +818,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
   statusEl.classList.add("busy");
   timeControl.hidden = true; // envelope has no dense level set -- no decay slider
   exportBtn.hidden = true;
+  shareBtn.hidden = true;
   clearGzMarker();
   currentPlume = null;
 
@@ -836,6 +855,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
       excluded_target_ids: resp.excluded_target_ids,
     } as GeoJsonFeatureCollection;
     exportBtn.hidden = false;
+    shareBtn.hidden = false;
     overviewBtn.hidden = false;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
@@ -855,15 +875,28 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
 // request nobody asked for on every page load would be rude to Open-Meteo
 // and confusing on a dead connection.
 
-function writeUrlState(opts: { mode: "plume" | "exchange"; tier?: 0 | 1 }): void {
+function writeUrlState(opts: { mode: "plume" | "exchange" | "ensemble"; tier?: 0 | 1 }): void {
   const params = new URLSearchParams();
   params.set("mode", opts.mode);
   params.set("yield_mt", yieldInput.value);
   params.set("ff", ffInput.value);
-  if (opts.mode === "plume") {
+  if (opts.mode !== "exchange") {
     params.set("lat", latInput.value);
     params.set("lon", lonInput.value);
+  }
+  if (opts.mode === "plume") {
     params.set("tier", String(opts.tier ?? 0));
+    if (manualWindCheckbox.checked) {
+      // speed,bearing,shear -- one param keeps the URL short
+      params.set(
+        "wind",
+        [windSpeedInput.value, windBearingInput.value, windShearInput.value].join(","),
+      );
+    }
+  }
+  if (opts.mode === "ensemble") {
+    params.set("level", ensembleLevelInput.value);
+    params.set("members", ensembleMembersInput.value);
   }
   history.replaceState(null, "", `?${params}`);
 }
@@ -883,6 +916,15 @@ function readUrlState(): void {
   }
   setIfFinite(latInput, "lat");
   setIfFinite(lonInput, "lon");
+  if (params.get("mode") === "ensemble") {
+    ensembleModeCheckbox.checked = true;
+    ensembleFields.hidden = false;
+    setIfFinite(ensembleLevelInput, "level");
+    setIfFinite(ensembleMembersInput, "members");
+    setAdvanced(true); // the ensemble controls live behind the disclosure
+    updateComputeButtonText();
+    return;
+  }
   const tier = params.get("tier");
   if (tier === "0" || tier === "1") {
     const radio = form.querySelector<HTMLInputElement>(`input[name="tier"][value="${tier}"]`);
@@ -890,6 +932,18 @@ function readUrlState(): void {
     // A shared link with the non-default model should show that choice, not
     // hide it behind the collapsed advanced section.
     if (tier === "1") setAdvanced(true);
+  }
+  const windParam = params.get("wind");
+  if (windParam) {
+    const [speed, bearing, shear] = windParam.split(",").map(Number);
+    if ([speed, bearing, shear].every(Number.isFinite)) {
+      manualWindCheckbox.checked = true;
+      manualWindFields.hidden = false;
+      windSpeedInput.value = String(speed);
+      windBearingInput.value = String(bearing);
+      windShearInput.value = String(shear);
+      setAdvanced(true);
+    }
   }
 }
 
