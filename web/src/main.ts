@@ -185,6 +185,10 @@ const map = new maplibregl.Map({
   zoom: 3.3,
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
+// Distance scale (backlog #23): one bar per unit system, stacked bottom-left,
+// so plume sizes are readable in both mi and km at any zoom.
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "imperial" }), "bottom-left");
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
 
 // Dev-only escape hatch for debugging map/tile state from the console
 // (map.loaded(), map.isStyleLoaded(), ...) -- module scope hides `map`.
@@ -1110,6 +1114,27 @@ function renderEnsembleLegend(probs: number[]): void {
     row.appendChild(label);
     legendEl.appendChild(row);
   }
+
+  // Uncertainty explainer (backlog #23): what the nested bands actually mean,
+  // phrased from the backend's own note (P(H+1 rate >= level) across wind
+  // members) -- no additional statistical claims.
+  const help = document.createElement("details");
+  help.className = "help";
+  const summary = document.createElement("summary");
+  summary.textContent = "How to read these bands";
+  help.appendChild(summary);
+  const p1 = document.createElement("p");
+  p1.textContent =
+    "The plume was recomputed once per forecast wind member; each band " +
+    "outlines where the H+1 dose rate exceeded your chosen level in at " +
+    "least that share of members. The faint 10% band is the outer edge of " +
+    "where fallout could plausibly reach given today's wind spread; the " +
+    "dark 90% band is where nearly all members agree it would. The gap " +
+    "between them IS the wind uncertainty — a wide gap means the forecast " +
+    "members disagree, so trust the outer band for planning margins, not " +
+    "the crisp inner line.";
+  help.appendChild(p1);
+  legendEl.appendChild(help);
 }
 
 // --- decay-time slider ------------------------------------------------------
