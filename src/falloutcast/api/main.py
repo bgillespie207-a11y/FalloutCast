@@ -67,21 +67,30 @@ app.add_middleware(
 )
 
 
-async def _resolve_wind(req: PlumeRequest) -> WindUsed:
+async def _resolve_wind(req: PlumeRequest) -> tuple[WindUsed, dict | None]:
+    """Effective wind for the request plus, when it was actually fetched,
+    the weather provenance (valid hour / retrieval time / age). Manual winds
+    fetch nothing, so their provenance is None."""
     if req.wind is not None:
-        return WindUsed(
-            speed_mph=req.wind.speed_mph,
-            bearing_deg=req.wind.bearing_deg,
-            shear_mph_per_kft=req.wind.shear_mph_per_kft,
-            source="manual",
+        return (
+            WindUsed(
+                speed_mph=req.wind.speed_mph,
+                bearing_deg=req.wind.bearing_deg,
+                shear_mph_per_kft=req.wind.shear_mph_per_kft,
+                source="manual",
+            ),
+            None,
         )
     profile = await openmeteo.fetch_profile(req.lat, req.lon)
     eff = openmeteo.reduce_profile(profile, cloud_top_height_m(req.yield_mt))
-    return WindUsed(
-        speed_mph=eff.speed_mph,
-        bearing_deg=eff.bearing_deg,
-        shear_mph_per_kft=eff.shear_mph_per_kft,
-        source="open-meteo-gfs",
+    return (
+        WindUsed(
+            speed_mph=eff.speed_mph,
+            bearing_deg=eff.bearing_deg,
+            shear_mph_per_kft=eff.shear_mph_per_kft,
+            source="open-meteo-gfs",
+        ),
+        _weather_provenance(profile.valid_time, profile.retrieved_at),
     )
 
 
@@ -287,11 +296,12 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
             "Tier-1 requires a fetched vertical wind profile; a manual single "
             "wind vector has no shear to advect through. Downgraded to Tier-0."
         )
-        wind = await _resolve_wind(req)
+        wind, weather = await _resolve_wind(req)
         contours = _tier0_contours(req, wind)
         return PlumeResponse(
             ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=0,
-            wind=wind, disclaimer=DISCLAIMER, notes=notes, contours=contours,
+            wind=wind, disclaimer=DISCLAIMER, notes=notes, weather=weather,
+            contours=contours,
         )
 
     if req.tier == 1:
@@ -309,18 +319,20 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
             ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=1,
             wind=WindUsed(source="open-meteo-gfs-profile"),
             disclaimer=DISCLAIMER, notes=notes, fraction_aloft=aloft,
+            weather=_weather_provenance(profile.valid_time, profile.retrieved_at),
             contours=contours,
         )
 
     # Tier-0
     try:
-        wind = await _resolve_wind(req)
+        wind, weather = await _resolve_wind(req)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc}")
     contours = _tier0_contours(req, wind)
     return PlumeResponse(
         ground_zero=[req.lon, req.lat], tier_requested=0, tier_used=0,
-        wind=wind, disclaimer=DISCLAIMER, notes=notes, contours=contours,
+        wind=wind, disclaimer=DISCLAIMER, notes=notes, weather=weather,
+        contours=contours,
     )
 
 
@@ -340,7 +352,7 @@ async def exchange(yield_mt: float = 0.3, fission_fraction: float = 0.5) -> dict
             lat=t.lat, lon=t.lon, yield_mt=yield_mt, fission_fraction=fission_fraction
         )
         try:
-            wind = await _resolve_wind(req)
+            wind, _weather = await _resolve_wind(req)
             contours = _tier0_contours(req, wind)
         except Exception as exc:
             results.append({"target": t.name, "error": str(exc)})
@@ -487,6 +499,11 @@ async def exchange_envelope(
     uniform_fission_fraction: float = Query(
         0.5, gt=0, le=1.0, description="uniform fission fraction; used only when per_class=false"
     ),
+    force_refresh: bool = Query(
+        False,
+        description="drop the per-hour wind cache first, so every bucket refetches "
+        "live winds instead of reusing profiles cached for the current valid hour",
+    ),
 ) -> ExchangeEnvelopeResponse:
     """Composite dose surface over the CURATED target deck (not "all targets").
 
@@ -515,6 +532,9 @@ async def exchange_envelope(
             status_code=422,
             detail=f"aggregation must be one of {list(_AGGREGATION_MAP)}, got {aggregation!r}",
         )
+
+    if force_refresh:
+        openmeteo.clear_profile_cache()
 
     tgts = targetdeck.load_expanded_targets() if expanded else targets_mod.load_targets()
 

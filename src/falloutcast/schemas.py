@@ -34,6 +34,16 @@ class WindUsed(BaseModel):
     source: str  # "open-meteo-gfs", "manual", or "open-meteo-gfs-profile"
 
 
+class WeatherProvenance(BaseModel):
+    """Which forecast the winds came from -- so 'current weather' is auditable
+    (fixes the long-standing bug where index 0 = 00:00 UTC was used)."""
+
+    valid_time: str                       # forecast hour used, ISO UTC
+    model: str                            # e.g. "GFS (Open-Meteo gfs_seamless)"
+    retrieved_at: Optional[str] = None    # when the winds were fetched, ISO UTC
+    age_seconds: Optional[int] = None     # staleness of the (possibly cached) winds
+
+
 class PlumeResponse(BaseModel):
     ground_zero: list[float]  # [lon, lat]
     tier_requested: int
@@ -42,6 +52,7 @@ class PlumeResponse(BaseModel):
     disclaimer: str
     notes: list[str] = []
     fraction_aloft: Optional[float] = None  # Tier-1 only: activity gone regional/global
+    weather: Optional[WeatherProvenance] = None  # None for manual wind (nothing fetched)
     contours: dict  # GeoJSON FeatureCollection
 
 
@@ -181,16 +192,6 @@ class EnsembleResponse(BaseModel):
     disclaimer: str
     notes: list[str] = []
     contours: dict  # probability bands: P(dose rate >= level_rhr)
-
-
-class WeatherProvenance(BaseModel):
-    """Which forecast the winds came from -- so 'current weather' is auditable
-    (fixes the long-standing bug where index 0 = 00:00 UTC was used)."""
-
-    valid_time: str                       # forecast hour used, ISO UTC
-    model: str                            # e.g. "GFS (Open-Meteo gfs_seamless)"
-    retrieved_at: Optional[str] = None    # when the winds were fetched, ISO UTC
-    age_seconds: Optional[int] = None     # staleness of the (possibly cached) winds
 
 
 class ExchangeEnvelopeResponse(BaseModel):

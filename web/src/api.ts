@@ -43,6 +43,7 @@ export interface PlumeResponse {
   disclaimer: string;
   notes: string[];
   fraction_aloft: number | null;
+  weather?: WeatherProvenance | null; // null/absent for manual wind (nothing fetched)
   contours: GeoJsonFeatureCollection;
 }
 
@@ -226,8 +227,10 @@ export function fetchTargets(expanded = false): Promise<Target[]> {
 // yield params are sent -- only the aggregation policy.
 export async function fetchExchangeEnvelope(
   aggregation: Aggregation = "max_single_source",
+  forceRefresh = false,
 ): Promise<ExchangeEnvelopeResponse> {
   const params = new URLSearchParams({ aggregation });
+  if (forceRefresh) params.set("force_refresh", "true");
   const resp = await fetch(`${__API_URL__}/exchange/envelope?${params}`, { method: "POST" });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => resp.statusText);

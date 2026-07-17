@@ -12,6 +12,7 @@ import {
   type ManualWind,
   type PlumeResponse,
   type PointExposureResponse,
+  type WeatherProvenance,
   type GeoJsonFeatureCollection,
   type TargetDeckMeta,
 } from "./api";
@@ -171,6 +172,9 @@ const exposurePfSelect = document.getElementById("exposure-pf") as HTMLSelectEle
 const exposureDosesEl = document.getElementById("exposure-doses") as HTMLDivElement;
 const exposureSetGzBtn = document.getElementById("exposure-set-gz") as HTMLButtonElement;
 const exposureNotesEl = document.getElementById("exposure-notes") as HTMLDivElement;
+const weatherInfoEl = document.getElementById("weather-info") as HTMLDivElement;
+const weatherTextEl = document.getElementById("weather-text") as HTMLSpanElement;
+const weatherRefreshBtn = document.getElementById("weather-refresh") as HTMLButtonElement;
 
 timeSlider.max = String(SLIDER_STEPS);
 
@@ -395,6 +399,7 @@ function clearResults(): void {
   notesEl.innerHTML = "";
   legendEl.innerHTML = "";
   clearContourTable();
+  renderWeather(null);
   timeControl.hidden = true;
   exportBtn.hidden = true;
   overviewBtn.hidden = true;
@@ -680,6 +685,7 @@ async function computeEnsembleBand(): Promise<void> {
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
     statusEl.textContent = `P(H+1 dose rate ≥ ${resp.level_rhr} R/hr) across ${resp.n_members} members.`;
+    renderWeather(null); // ensemble responses carry no single-forecast provenance
     renderPlainNotes(resp.notes);
     renderEnsembleContours(resp.contours, resp.ground_zero);
     exportGeoJson = resp.contours;
@@ -756,6 +762,7 @@ async function computeSinglePlume(): Promise<void> {
 
     const inspectHint = inspectContext ? " Click the map to assess a point." : "";
     statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}.${inspectHint}`;
+    renderWeather(resp.weather);
     renderNotes(resp);
     timeControl.hidden = false;
     exportBtn.hidden = false;
@@ -773,7 +780,7 @@ async function computeSinglePlume(): Promise<void> {
   }
 }
 
-async function computeExchangeEnvelope(): Promise<void> {
+async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
   const token = newComputeToken();
   computeBtn.disabled = true;
   statusEl.classList.remove("error");
@@ -788,7 +795,7 @@ async function computeExchangeEnvelope(): Promise<void> {
     // ~500 live wind buckets + grid compositing: seconds, not instant. Keep an
     // elapsed ticker running so it never looks hung (the reviewer's finding).
     startElapsed("Computing national envelope (live wind for the whole deck)");
-    const resp = await withTimeout(fetchExchangeEnvelope("max_single_source"));
+    const resp = await withTimeout(fetchExchangeEnvelope("max_single_source", forceRefresh));
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
     setDisclaimer(resp.disclaimer);
@@ -797,9 +804,9 @@ async function computeExchangeEnvelope(): Promise<void> {
     map.flyTo({ center: OVERVIEW, zoom: OVERVIEW_ZOOM });
 
     writeUrlState({ mode: "exchange" });
-    const validHour = resp.weather ? ` · winds valid ${resp.weather.valid_time}Z` : "";
     statusEl.textContent =
-      `Max-single-source envelope across ${resp.n_targets} target(s).${validHour}`;
+      `Max-single-source envelope across ${resp.n_targets} target(s).`;
+    renderWeather(resp.weather); // valid hour + staleness live here now
     renderPlainNotes(resp.notes);
     renderStaticContours(resp.contours);
     renderSyntheticBadge();
@@ -1455,6 +1462,42 @@ exportBtn.addEventListener("click", () => {
   // Deferred: revoking synchronously races the download engine's read of the
   // blob in some browsers (the FileSaver-style guard).
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+});
+
+// --- weather provenance + manual refresh ---------------------------------------
+// Visible answer to "how fresh are these winds?" (backlog #23): forecast model,
+// the valid hour actually used, and fetch staleness, with a control to refetch.
+// Hidden whenever the last compute fetched nothing (manual wind) or carries no
+// provenance (ensemble responses).
+
+function describeAge(seconds: number): string {
+  if (seconds < 90) return "just now";
+  const min = Math.round(seconds / 60);
+  if (min < 90) return `${min} min ago`;
+  return `${(min / 60).toFixed(1)} h ago`;
+}
+
+function renderWeather(w: WeatherProvenance | null | undefined): void {
+  if (!w) {
+    weatherInfoEl.hidden = true;
+    weatherTextEl.textContent = "";
+    return;
+  }
+  const age = w.age_seconds != null ? `, fetched ${describeAge(w.age_seconds)}` : "";
+  weatherTextEl.textContent = `Winds: ${w.model} · valid ${w.valid_time}Z${age}.`;
+  weatherInfoEl.hidden = false;
+}
+
+weatherRefreshBtn.addEventListener("click", () => {
+  if (computeBtn.disabled) return; // a compute is already in flight
+  if (exchangeMode) {
+    // force_refresh drops the per-hour wind cache server-side; a plain rerun
+    // would silently reuse cached profiles for the same valid hour.
+    void computeExchangeEnvelope(true);
+  } else {
+    // The single-plume/ensemble paths fetch fresh winds on every compute.
+    void computePlume();
+  }
 });
 
 // --- disclaimer --------------------------------------------------------------

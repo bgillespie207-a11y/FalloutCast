@@ -284,6 +284,30 @@ button:disabled {
   color: #a11;
 }
 
+/* Weather provenance line + manual refresh. */
+#weather-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: #555;
+}
+#weather-info span {
+  flex: 1;
+}
+#weather-refresh {
+  width: auto;
+  min-height: 32px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  background: #eceae6;
+  color: #333;
+  border: 1px solid #bbb;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 #status.busy::before {
   content: "";
   display: inline-block;

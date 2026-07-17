@@ -237,6 +237,13 @@
         to role="alert" (assertive) in JS so screen readers interrupt. -->
         <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
 
+        <!-- Weather provenance for the last compute that fetched live winds:
+        which forecast hour, and how stale the fetch is (backlog #23). -->
+        <div id="weather-info" hidden>
+          <span id="weather-text"></span>
+          <button type="button" id="weather-refresh">Refresh winds</button>
+        </div>
+
         <section id="time-control" hidden>
           <label for="time-slider">
             Time after burst: <span id="time-label">H+1</span>
