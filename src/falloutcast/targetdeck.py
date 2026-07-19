@@ -60,8 +60,15 @@ from .targets import load_targets
 # This is a VERSIONED dataset, not a one-off: silo geography is expected to be
 # refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
 # facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
-DATASET_VERSION = "2025.4-mapanchored"
+DATASET_VERSION = "2025.5-metros"
 VERIFY_DATE = "2026-07-13"
+# Date of the most recent HVT (population/economic/C2) curation pass. Kept
+# SEPARATE from VERIFY_DATE on purpose: the metro-population expansion below was
+# reviewed today, but the missileer-verified silo/field geography was NOT
+# re-verified, so it keeps its own (earlier) VERIFY_DATE rather than being
+# restamped as freshly checked (project rule #1: never claim a verification that
+# did not happen).
+HVT_VERIFY_DATE = "2026-07-19"
 
 # Provenance. Flight ORGANIZATION and each flight's approximate geographic AREA
 # are now anchored to public USAF missile site maps (flights sit at real,
@@ -274,33 +281,70 @@ def generate_all_fields() -> list[Target]:
 # publicly documented locations. Categories drive the frontend styling/legend.
 
 # (name, lon, lat, category, note)
+#
+# POPULATION CENTERS -- selection basis (was a subtle bug worth stating):
+# these are the ~50 most populous US METROPOLITAN areas (Census MSA), NOT the
+# top cities by municipal ("city-proper") population. City-proper population is
+# an artifact of where municipal boundaries were drawn (it inflates cities like
+# Jacksonville/San Jose and hides large metros like Cleveland, Milwaukee, or
+# Raleigh whose population sits mostly in suburbs), so it is the wrong proxy for
+# a population-center fallout source. Coordinates are approximate metro-anchor
+# city centers (ordinary public geography). The Washington, DC metro (Census #6)
+# is represented by the national-C2 command node below, not duplicated here.
+# This is an illustrative, curated set for fallout modeling -- NOT a claim that
+# these specific cities are targeted. Tail membership (~#45-50) varies by
+# Census vintage.
 _HVT: list[tuple[str, float, float, str, str]] = [
-    # Population centers (approx. city-center coordinates, top US metros)
     ("New York City", -74.006, 40.713, "city_population", "largest US metro"),
     ("Los Angeles", -118.244, 34.052, "city_population", ""),
     ("Chicago", -87.630, 41.878, "city_population", ""),
-    ("Houston", -95.369, 29.760, "city_population", "port + petrochemical"),
-    ("Phoenix", -112.074, 33.448, "city_population", ""),
-    ("Philadelphia", -75.165, 39.953, "city_population", ""),
-    ("San Antonio", -98.494, 29.424, "city_population", ""),
-    ("San Diego", -117.161, 32.716, "city_population", "major naval complex"),
     ("Dallas", -96.797, 32.777, "city_population", ""),
-    ("San Jose", -121.887, 37.339, "city_population", ""),
-    ("Austin", -97.743, 30.267, "city_population", ""),
-    ("Jacksonville", -81.656, 30.332, "city_population", ""),
-    ("Columbus", -82.999, 39.961, "city_population", ""),
-    ("Charlotte", -80.843, 35.227, "city_population", ""),
-    ("Indianapolis", -86.158, 39.768, "city_population", ""),
-    ("San Francisco", -122.419, 37.775, "city_population", ""),
-    ("Seattle", -122.332, 47.606, "city_population", ""),
-    ("Denver", -104.991, 39.739, "city_population", ""),
-    ("Boston", -71.058, 42.360, "city_population", ""),
-    ("Detroit", -83.046, 42.331, "city_population", ""),
+    ("Houston", -95.369, 29.760, "city_population", "port + petrochemical"),
+    ("Philadelphia", -75.165, 39.953, "city_population", ""),
     ("Atlanta", -84.388, 33.749, "city_population", ""),
     ("Miami", -80.192, 25.762, "city_population", ""),
+    ("Phoenix", -112.074, 33.448, "city_population", ""),
+    ("Boston", -71.058, 42.360, "city_population", ""),
+    ("Riverside–San Bernardino", -117.396, 33.953, "city_population", "Inland Empire metro"),
+    ("San Francisco", -122.419, 37.775, "city_population", ""),
+    ("Detroit", -83.046, 42.331, "city_population", ""),
+    ("Seattle", -122.332, 47.606, "city_population", ""),
     ("Minneapolis", -93.265, 44.978, "city_population", ""),
-    ("Portland", -122.676, 45.523, "city_population", ""),
+    ("Tampa", -82.457, 27.951, "city_population", ""),
+    ("San Diego", -117.161, 32.716, "city_population", "major naval complex"),
+    ("Denver", -104.991, 39.739, "city_population", ""),
+    ("Baltimore", -76.612, 39.290, "city_population", ""),
+    ("Orlando", -81.379, 28.538, "city_population", ""),
+    ("Charlotte", -80.843, 35.227, "city_population", ""),
     ("St. Louis", -90.199, 38.627, "city_population", ""),
+    ("San Antonio", -98.494, 29.424, "city_population", ""),
+    ("Portland", -122.676, 45.523, "city_population", ""),
+    ("Austin", -97.743, 30.267, "city_population", ""),
+    ("Pittsburgh", -79.996, 40.441, "city_population", ""),
+    ("Sacramento", -121.494, 38.582, "city_population", ""),
+    ("Las Vegas", -115.139, 36.170, "city_population", ""),
+    ("Cincinnati", -84.512, 39.103, "city_population", ""),
+    ("Kansas City", -94.579, 39.100, "city_population", ""),
+    ("Columbus", -82.999, 39.961, "city_population", ""),
+    ("Indianapolis", -86.158, 39.768, "city_population", ""),
+    ("Cleveland", -81.694, 41.499, "city_population", ""),
+    ("San Jose", -121.887, 37.339, "city_population", ""),
+    ("Nashville", -86.784, 36.163, "city_population", ""),
+    ("Virginia Beach–Norfolk", -76.285, 36.851, "city_population",
+     "major naval complex (Naval Station Norfolk)"),
+    ("Jacksonville", -81.656, 30.332, "city_population", ""),
+    ("Milwaukee", -87.906, 43.039, "city_population", ""),
+    ("Providence", -71.413, 41.824, "city_population", ""),
+    ("Oklahoma City", -97.517, 35.467, "city_population", ""),
+    ("Raleigh", -78.638, 35.780, "city_population", ""),
+    ("Memphis", -90.049, 35.149, "city_population", ""),
+    ("Richmond", -77.436, 37.541, "city_population", ""),
+    ("Louisville", -85.759, 38.253, "city_population", ""),
+    ("New Orleans", -90.071, 29.951, "city_population", ""),
+    ("Salt Lake City", -111.891, 40.761, "city_population", ""),
+    ("Hartford", -72.685, 41.764, "city_population", ""),
+    ("Buffalo", -78.878, 42.886, "city_population", ""),
+    ("Birmingham", -86.802, 33.521, "city_population", ""),
     # Government command & control
     ("Washington, D.C. (national C2)", -77.037, 38.907, "command",
      "national command authority / Pentagon"),
@@ -342,7 +386,7 @@ def high_value_targets() -> list[Target]:
             id=_slug(n), name=n, lat=lat, lon=lon, category=cat, note=note,
             site_type=cat, accuracy_m=1000.0, confidence="high",
             geography_mode="observed", source="public geography (city/site centroid)",
-            pub_date="n/a", verify_date=VERIFY_DATE,
+            pub_date="n/a", verify_date=HVT_VERIFY_DATE,
             status="curated, incomplete selection",
         )
         for (n, lon, lat, cat, note) in _HVT
@@ -428,7 +472,7 @@ def deck_meta() -> TargetDeckMeta:
     return TargetDeckMeta(
         version=DATASET_VERSION,
         content_hash=dataset_content_hash(),
-        generated=VERIFY_DATE,
+        generated=HVT_VERIFY_DATE,
         n_targets=len(targets),
         n_synthetic=n_synth,
         fields=field_polygons(),
