@@ -48,6 +48,9 @@ const TARGET_COLORS: Record<string, [number, number, number, number]> = {
   icbm_lcc: [10, 40, 110, 230],      // launch control center
   bomber_base: [90, 60, 160, 220],
   ssbn_base: [0, 130, 150, 220],
+  naval_base: [70, 130, 180, 220],   // surface/attack-sub fleet (e.g. Pearl Harbor)
+  air_base: [150, 100, 205, 220],    // military airfield (e.g. Eielson, JBER)
+  missile_defense: [20, 160, 110, 225], // GMD interceptors / early-warning radar
   storage: [120, 120, 130, 220],
   command: [200, 40, 40, 235],       // government / C2
   city_population: [235, 130, 40, 220],
@@ -84,6 +87,9 @@ const TARGET_LABELS: Record<string, string> = {
   icbm_lcc: "Launch control center",
   bomber_base: "Bomber base",
   ssbn_base: "SSBN base",
+  naval_base: "Naval base",
+  air_base: "Air base",
+  missile_defense: "Missile defense / warning",
   storage: "Weapons storage",
   command: "Government / C2",
   city_population: "Population center",

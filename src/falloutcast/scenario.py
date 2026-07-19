@@ -82,6 +82,10 @@ _COUNTERFORCE = (
     "counterforce hard-target RV (few-hundred-kt class); Plan A counterforce "
     "phase targets nuclear forces. Yield illustrative, not a specific weapon."
 )
+_COUNTERFORCE_MIL = (
+    "counterforce strike on a military installation (naval/air/missile-defense; "
+    "few-hundred-kt class). Yield illustrative, not a specific weapon."
+)
 _COUNTERVALUE = (
     "countervalue weapon (up to ~1 Mt); Plan A city phase hits the ~30 largest "
     "cities. Yield illustrative, not a specific weapon."
@@ -94,6 +98,9 @@ DEFAULT_SCENARIO: dict[str, YieldAssumption] = {
     "icbm_lcc": YieldAssumption("icbm_lcc", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE),
     "bomber_base": YieldAssumption("bomber_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE),
     "ssbn_base": YieldAssumption("ssbn_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE),
+    "naval_base": YieldAssumption("naval_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
+    "air_base": YieldAssumption("air_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
+    "missile_defense": YieldAssumption("missile_defense", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
     "storage": YieldAssumption("storage", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE),
     "command": YieldAssumption("command", 0.50, 0.30, 1.00, 0.5, _COUNTERVALUE),
     "city_population": YieldAssumption("city_population", 0.50, 0.30, 1.00, 0.5, _COUNTERVALUE),

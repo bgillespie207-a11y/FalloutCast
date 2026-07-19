@@ -73,6 +73,18 @@ def sample(
 CONUS_LON_MIN, CONUS_LON_MAX = -125.5, -66.0
 CONUS_LAT_MIN, CONUS_LAT_MAX = 24.0, 50.0
 
+# The envelope grid spans the whole modeled US: CONUS PLUS the Alaska and Hawaii
+# strategic sites now in the target deck (targetdeck.py). It is a superset of
+# the CONUS box above -- the local-window path (radius_deg) SKIPS any target
+# whose window falls entirely outside the grid bounds, so a Hawaii or Alaska
+# ground zero would otherwise contribute a bare dot with no fallout plume. West
+# to -162 covers Hawaii (~-158) with plume margin; north to 68 covers the
+# Alaskan interior bases (~65 N). Still an engineering/UX map-extent choice, not
+# a physical constant. Contouring cost is ~O(cells) but the added area is empty
+# ocean (all-zero), so it stays cheap.
+US_LON_MIN, US_LON_MAX = -162.0, -66.0
+US_LAT_MIN, US_LAT_MAX = 18.0, 68.0
+
 
 # Aggregation policies for compositing many targets onto one grid.
 #   "max"  -- cell-wise MAX: the worst dose from ANY SINGLE source at each point.
@@ -86,8 +98,8 @@ AGGREGATIONS = ("max", "sum")
 def sample_envelope(
     models: list[tuple[WSEG10, float, float]],
     *,
-    lon_bounds: tuple[float, float] = (CONUS_LON_MIN, CONUS_LON_MAX),
-    lat_bounds: tuple[float, float] = (CONUS_LAT_MIN, CONUS_LAT_MAX),
+    lon_bounds: tuple[float, float] = (US_LON_MIN, US_LON_MAX),
+    lat_bounds: tuple[float, float] = (US_LAT_MIN, US_LAT_MAX),
     resolution_deg: float = 0.1,
     radius_deg: float | None = None,
     aggregation: str = "max",

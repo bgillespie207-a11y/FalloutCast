@@ -60,7 +60,7 @@ from .targets import load_targets
 # This is a VERSIONED dataset, not a one-off: silo geography is expected to be
 # refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
 # facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
-DATASET_VERSION = "2025.5-metros"
+DATASET_VERSION = "2025.6-hi-ak-infra"
 VERIFY_DATE = "2026-07-13"
 # Date of the most recent HVT (population/economic/C2) curation pass. Kept
 # SEPARATE from VERIFY_DATE on purpose: the metro-population expansion below was
@@ -276,9 +276,11 @@ def generate_all_fields() -> list[Target]:
 
 
 # --- High-value targets (public) ---------------------------------------------
-# Major population centers, economic/industrial nodes, and government C2. City
-# coordinates are ordinary public geography; the government/industrial sites are
-# publicly documented locations. Categories drive the frontend styling/legend.
+# Major population centers, economic/industrial nodes (incl. critical
+# infrastructure like the largest dams), government C2, and the major Hawaii /
+# Alaska military installations. City coordinates are ordinary public geography;
+# the government/industrial/military sites are publicly documented locations.
+# Categories drive the frontend styling/legend and the per-class scenario yield.
 
 # (name, lon, lat, category, note)
 #
@@ -362,6 +364,28 @@ _HVT: list[tuple[str, float, float, str, str]] = [
      "Gulf Coast refining"),
     ("Baton Rouge petrochemical corridor", -91.187, 30.451, "industry", ""),
     ("Silicon Valley (tech industry)", -122.083, 37.386, "industry", ""),
+    # Critical infrastructure -- major hydroelectric / water. Illustrative, not
+    # exhaustive: these are the two iconic large US dams (public geography).
+    ("Hoover Dam", -114.737, 36.016, "industry",
+     "hydroelectric + Colorado River water (Lake Mead)"),
+    ("Grand Coulee Dam", -118.982, 47.957, "industry",
+     "largest US hydroelectric power station"),
+
+    # --- Non-CONUS strategic sites: Hawaii & Alaska --------------------------
+    # Publicly documented major military installations outside the CONUS box.
+    # Coordinates are ordinary public geography (installation centroids). The
+    # envelope grid was widened to cover these (see grid.US_* bounds) so they
+    # produce real fallout plumes, not bare dots. Illustrative/incomplete.
+    ("Joint Base Pearl Harbor-Hickam", -157.950, 21.350, "naval_base",
+     "US Pacific Fleet HQ; Hickam airfield; INDOPACOM (Camp Smith) adjacent (HI)"),
+    ("Joint Base Elmendorf-Richardson", -149.800, 61.250, "air_base",
+     "11th Air Force / Alaskan NORAD Region (ALCOM); F-22s (Anchorage, AK)"),
+    ("Eielson AFB", -147.100, 64.670, "air_base",
+     "F-35 + aerial-refueling hub; Pacific/Arctic operations (AK)"),
+    ("Fort Greely (GMD)", -145.740, 63.950, "missile_defense",
+     "Ground-based Midcourse Defense interceptor field -- homeland missile defense (AK)"),
+    ("Clear Space Force Station", -149.190, 64.300, "missile_defense",
+     "early-warning radar (BMEWS / Long Range Discrimination Radar) (AK)"),
 ]
 
 

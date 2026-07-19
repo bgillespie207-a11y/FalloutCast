@@ -102,8 +102,34 @@ def test_to_geojson_lonlat_is_a_valid_feature_collection():
 
 def test_envelope_grid_covers_requested_bounds():
     g = grid.sample_envelope([], resolution_deg=1.0)
-    assert g.lon_deg[0] == pytest.approx(grid.CONUS_LON_MIN)
-    assert g.lon_deg[-1] == pytest.approx(grid.CONUS_LON_MAX)
-    assert g.lat_deg[0] == pytest.approx(grid.CONUS_LAT_MIN)
-    assert g.lat_deg[-1] == pytest.approx(grid.CONUS_LAT_MAX)
+    assert g.lon_deg[0] == pytest.approx(grid.US_LON_MIN)
+    assert g.lon_deg[-1] == pytest.approx(grid.US_LON_MAX)
+    assert g.lat_deg[0] == pytest.approx(grid.US_LAT_MIN)
+    assert g.lat_deg[-1] == pytest.approx(grid.US_LAT_MAX)
     assert np.all(g.dose_rate_h1 == 0.0)  # no models -> all-zero envelope
+
+
+def test_default_envelope_grid_reaches_hawaii_and_alaska():
+    """The default bounds must cover the Hawaii/Alaska strategic sites now in
+    the deck, so their plumes are not silently clipped by the local-window path
+    (which skips any target whose window falls entirely outside the grid)."""
+    pearl_harbor = (21.35, -157.95)
+    fort_greely = (63.95, -145.74)
+    for lat, lon in (pearl_harbor, fort_greely):
+        assert grid.US_LON_MIN <= lon <= grid.US_LON_MAX
+        assert grid.US_LAT_MIN <= lat <= grid.US_LAT_MAX
+        # a target there deposits a nonzero plume through the local-window path
+        g = grid.sample_envelope([(_model(), lat, lon)], resolution_deg=0.2, radius_deg=10.0)
+        assert g.dose_rate_h1.max() > 0.0
+
+
+def test_hawaii_alaska_and_infra_sites_are_in_the_deck():
+    from falloutcast import targetdeck
+    names = {t.name for t in targetdeck.load_expanded_targets()}
+    for expected in (
+        "Hoover Dam", "Grand Coulee Dam",
+        "Joint Base Pearl Harbor-Hickam", "Eielson AFB", "Fort Greely (GMD)",
+    ):
+        assert expected in names, expected
+    cats = {t.category for t in targetdeck.load_expanded_targets()}
+    assert {"naval_base", "air_base", "missile_defense"} <= cats
