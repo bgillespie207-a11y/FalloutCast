@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .. import contour, exposure, grid, scenario, targetdeck, targets as targets_mod
 from ..physics import decay, ensemble
 from ..physics import tier1
+from ..physics import units
 from ..physics.wseg10 import WSEG10, cloud_top_height_m
 from ..schemas import (
     DISCLAIMER,
@@ -44,6 +45,7 @@ from ..schemas import (
     PointExposureResponse,
     Target,
     TargetDeckMeta,
+    WindProfilePoint,
     WindUsed,
 )
 from ..weather import openmeteo
@@ -67,10 +69,12 @@ app.add_middleware(
 )
 
 
-async def _resolve_wind(req: PlumeRequest) -> tuple[WindUsed, dict | None]:
-    """Effective wind for the request plus, when it was actually fetched,
-    the weather provenance (valid hour / retrieval time / age). Manual winds
-    fetch nothing, so their provenance is None."""
+async def _resolve_wind(req: PlumeRequest):
+    """Effective wind for the request plus, when it was actually fetched, the
+    weather provenance (valid hour / retrieval time / age) and the raw vertical
+    profile. Manual winds fetch nothing, so provenance and profile are None.
+
+    Returns (WindUsed, provenance | None, WindProfile | None)."""
     if req.wind is not None:
         return (
             WindUsed(
@@ -79,6 +83,7 @@ async def _resolve_wind(req: PlumeRequest) -> tuple[WindUsed, dict | None]:
                 shear_mph_per_kft=req.wind.shear_mph_per_kft,
                 source="manual",
             ),
+            None,
             None,
         )
     profile = await openmeteo.fetch_profile(req.lat, req.lon)
@@ -91,7 +96,30 @@ async def _resolve_wind(req: PlumeRequest) -> tuple[WindUsed, dict | None]:
             source="open-meteo-gfs",
         ),
         _weather_provenance(profile.valid_time, profile.retrieved_at),
+        profile,
     )
+
+
+def _wind_profile_points(profile, yield_mt: float) -> list[WindProfilePoint]:
+    """The fetched vertical profile as level-by-level points for the UI's
+    wind-by-altitude viz. `in_fallout_layer` mirrors reduce_profile's averaging
+    mask: levels at/below the stabilized-cloud top shape the local footprint;
+    higher levels loft fine particles regionally."""
+    cloud_top = cloud_top_height_m(yield_mt)
+    layer_top = max(cloud_top, float(profile.height_m[0]))
+    pts: list[WindProfilePoint] = []
+    for h, s, d in zip(profile.height_m, profile.speed_ms, profile.direction_deg):
+        pts.append(
+            WindProfilePoint(
+                height_m=float(h),
+                height_kft=float(h) / 304.8,
+                speed_mph=units.ms_to_mph(float(s)),
+                from_deg=float(d),
+                toward_deg=(float(d) + 180.0) % 360.0,
+                in_fallout_layer=float(h) <= layer_top,
+            )
+        )
+    return pts
 
 
 def _tier0_contours(req: PlumeRequest, wind: WindUsed) -> dict:
@@ -296,11 +324,12 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
             "Tier-1 requires a fetched vertical wind profile; a manual single "
             "wind vector has no shear to advect through. Downgraded to Tier-0."
         )
-        wind, weather = await _resolve_wind(req)
+        wind, weather, profile = await _resolve_wind(req)
         contours = _tier0_contours(req, wind)
         return PlumeResponse(
             ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=0,
             wind=wind, disclaimer=DISCLAIMER, notes=notes, weather=weather,
+            wind_profile=_wind_profile_points(profile, req.yield_mt) if profile else None,
             contours=contours,
         )
 
@@ -320,18 +349,20 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
             wind=WindUsed(source="open-meteo-gfs-profile"),
             disclaimer=DISCLAIMER, notes=notes, fraction_aloft=aloft,
             weather=_weather_provenance(profile.valid_time, profile.retrieved_at),
+            wind_profile=_wind_profile_points(profile, req.yield_mt),
             contours=contours,
         )
 
     # Tier-0
     try:
-        wind, weather = await _resolve_wind(req)
+        wind, weather, profile = await _resolve_wind(req)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"wind fetch failed: {exc}")
     contours = _tier0_contours(req, wind)
     return PlumeResponse(
         ground_zero=[req.lon, req.lat], tier_requested=0, tier_used=0,
         wind=wind, disclaimer=DISCLAIMER, notes=notes, weather=weather,
+        wind_profile=_wind_profile_points(profile, req.yield_mt) if profile else None,
         contours=contours,
     )
 
@@ -352,7 +383,7 @@ async def exchange(yield_mt: float = 0.3, fission_fraction: float = 0.5) -> dict
             lat=t.lat, lon=t.lon, yield_mt=yield_mt, fission_fraction=fission_fraction
         )
         try:
-            wind, _weather = await _resolve_wind(req)
+            wind, _weather, _profile = await _resolve_wind(req)
             contours = _tier0_contours(req, wind)
         except Exception as exc:
             results.append({"target": t.name, "error": str(exc)})

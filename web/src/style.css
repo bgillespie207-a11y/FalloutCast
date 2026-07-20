@@ -508,6 +508,19 @@ button:disabled {
   margin-bottom: 0.4rem;
 }
 
+/* Wind-by-altitude viz. */
+#wind-profile {
+  margin-top: 0.8rem;
+}
+#wind-profile .windprof {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+#wind-profile .hint {
+  margin-top: 0.2rem;
+}
+
 #notes {
   margin-top: 1rem;
   font-size: 0.75rem;

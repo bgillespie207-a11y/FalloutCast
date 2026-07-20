@@ -35,6 +35,15 @@ export interface GeoJsonFeatureCollection {
   }>;
 }
 
+export interface WindProfilePoint {
+  height_m: number;
+  height_kft: number;
+  speed_mph: number;
+  from_deg: number;
+  toward_deg: number;
+  in_fallout_layer: boolean;
+}
+
 export interface PlumeResponse {
   ground_zero: [number, number];
   tier_requested: number;
@@ -44,6 +53,7 @@ export interface PlumeResponse {
   notes: string[];
   fraction_aloft: number | null;
   weather?: WeatherProvenance | null; // null/absent for manual wind (nothing fetched)
+  wind_profile?: WindProfilePoint[] | null; // vertical profile; null for manual wind
   contours: GeoJsonFeatureCollection;
 }
 

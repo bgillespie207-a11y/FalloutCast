@@ -115,11 +115,20 @@ loading after the last styledata event, e.g. in a background tab.)
   version comes from a new `__APP_VERSION__` Vite define (package.json);
   changing vite.config requires a dev-server restart to take effect.
 
+**Also done (2026-07-20):**
+- Wind-by-altitude viz: `/plume` now returns the fetched vertical `wind_profile`
+  (one point per pressure level: height, speed, from/toward bearing,
+  `in_fallout_layer`) for live-wind computes — no extra fetch, `_resolve_wind`
+  just also returns the profile it already fetched. Frontend renders a compact
+  SVG arrow column (`renderWindProfile` in main.ts, `#wind-profile`): north-up
+  arrows per level, length ∝ speed, bold for the cloud-descent layer / faint
+  for higher winds — makes shear visible. Hidden for manual wind (nothing
+  fetched) and ensemble/envelope modes.
+
 **Remaining:**
-- **Wind arrows / altitude-profile** viz (the profile is fetched in `openmeteo`).
 - **Metric/US unit switch** (miles↔km, R↔Sv-ish). Several displays already show
-  both km and mi (contour table, exposure panel, scale bars, and now the
-  exported report).
+  both km and mi (contour table, exposure panel, scale bars, exported report,
+  wind profile). This is the last #23 item.
 
 ## Architecture map (where things live)
 

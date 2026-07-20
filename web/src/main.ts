@@ -14,6 +14,7 @@ import {
   type PlumeResponse,
   type PointExposureResponse,
   type WeatherProvenance,
+  type WindProfilePoint,
   type YieldPolicy,
   type GeoJsonFeatureCollection,
   type TargetDeckMeta,
@@ -183,6 +184,7 @@ shareBtn.addEventListener("click", async () => {
   }
 });
 const notesEl = document.getElementById("notes") as HTMLDivElement;
+const windProfileEl = document.getElementById("wind-profile") as HTMLElement;
 const disclaimerToggle = document.getElementById("disclaimer-toggle") as HTMLButtonElement;
 const disclaimerFullEl = document.getElementById("disclaimer-full") as HTMLDivElement;
 const exposureSection = document.getElementById("exposure") as HTMLElement;
@@ -435,6 +437,7 @@ function clearResults(): void {
   legendEl.innerHTML = "";
   clearContourTable();
   renderWeather(null);
+  clearWindProfile();
   timeControl.hidden = true;
   exportBtn.hidden = true;
   reportBtn.hidden = true;
@@ -699,6 +702,7 @@ async function computeEnsembleBand(): Promise<void> {
   currentPlume = null;
   closeExposure();
   inspectContext = null;
+  clearWindProfile();
   clearTargetMarkers();
 
   const level = Number(ensembleLevelInput.value);
@@ -830,6 +834,11 @@ async function computeSinglePlume(): Promise<void> {
     statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}.${inspectHint}`;
     renderWeather(resp.weather);
     renderNotes(resp);
+    if (resp.wind_profile && resp.wind_profile.length > 0) {
+      renderWindProfile(resp.wind_profile);
+    } else {
+      clearWindProfile();
+    }
     const plumeNotes = [...resp.notes];
     if (resp.fraction_aloft != null && resp.fraction_aloft > 0.01) {
       plumeNotes.push(
@@ -882,6 +891,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
   shareBtn.hidden = true;
   clearGzMarker();
   currentPlume = null;
+  clearWindProfile();
 
   try {
     await ensureMapReady();
@@ -1066,6 +1076,80 @@ function renderPlainNotes(notes: string[]): void {
     p.textContent = note;
     notesEl.appendChild(p);
   }
+}
+
+// --- wind-by-altitude viz -----------------------------------------------------
+// A compact column of arrows, one per fetched pressure level (highest altitude
+// at top), showing which way the wind carries fallout at each height and how
+// fast (arrow length). North is up, so the arrows are map-aligned. The lower
+// "cloud-descent" layer that shapes the local footprint is drawn bold; the
+// higher winds that loft fine particles regionally are faint. This makes wind
+// shear -- the thing Tier 1 resolves and the "shear" control approximates --
+// directly visible.
+
+function clearWindProfile(): void {
+  windProfileEl.hidden = true;
+  windProfileEl.innerHTML = "";
+}
+
+function renderWindProfile(points: WindProfilePoint[]): void {
+  if (points.length === 0) {
+    clearWindProfile();
+    return;
+  }
+  // Highest altitude first (top of the column).
+  const rows = [...points].sort((a, b) => b.height_m - a.height_m);
+  const maxSpeed = Math.max(1, ...rows.map((p) => p.speed_mph));
+
+  const W = 288;
+  const rowH = 24;
+  const padY = 6;
+  const cx = 150;
+  const H = padY * 2 + rows.length * rowH;
+
+  const parts: string[] = [];
+  // Faint band behind the fallout-layer (lower) rows to group them.
+  const layerRows = rows.filter((p) => p.in_fallout_layer).length;
+  if (layerRows > 0) {
+    const bandY = padY + (rows.length - layerRows) * rowH;
+    parts.push(
+      `<rect x="0" y="${bandY}" width="${W}" height="${layerRows * rowH}" rx="4" fill="rgba(26,77,46,0.07)"/>`,
+    );
+  }
+
+  rows.forEach((p, i) => {
+    const cy = padY + i * rowH + rowH / 2;
+    const bold = p.in_fallout_layer;
+    const color = bold ? "#1a4d2e" : "#8a94a0";
+    const half = 4 + (p.speed_mph / maxSpeed) * 16;
+    const tipY = cy - half;
+    // Up-pointing arrow rotated clockwise by the compass "toward" bearing
+    // (0 = north = up), so the column reads in real map orientation.
+    parts.push(
+      `<g transform="rotate(${p.toward_deg.toFixed(1)} ${cx} ${cy})" stroke="${color}" fill="${color}">` +
+        `<line x1="${cx}" y1="${cy + half}" x2="${cx}" y2="${tipY}" stroke-width="2"/>` +
+        `<path d="M${cx} ${tipY} L${cx - 3.5} ${tipY + 6} L${cx + 3.5} ${tipY + 6} Z" stroke="none"/>` +
+        `</g>`,
+    );
+    parts.push(
+      `<text x="6" y="${cy}" font-size="11" fill="${color}" dominant-baseline="middle">${p.height_kft.toFixed(0)} kft</text>`,
+    );
+    parts.push(
+      `<text x="${W - 6}" y="${cy}" font-size="11" fill="${color}" text-anchor="end" dominant-baseline="middle">${p.speed_mph.toFixed(0)} mph</text>`,
+    );
+  });
+
+  const surface = rows[rows.length - 1];
+  const ariaLabel =
+    `Wind by altitude, ${rows.length} levels. Surface ${surface.speed_mph.toFixed(0)} mph toward ` +
+    `${compassName(surface.toward_deg)}; top level ${rows[0].speed_mph.toFixed(0)} mph toward ${compassName(rows[0].toward_deg)}.`;
+
+  windProfileEl.innerHTML =
+    `<div class="legend-title">Wind by altitude</div>` +
+    `<svg viewBox="0 0 ${W} ${H}" class="windprof" role="img" aria-label="${ariaLabel}">${parts.join("")}</svg>` +
+    `<p class="hint">Arrows point the way winds carry fallout at each altitude (north is up; longer = faster). ` +
+    `Bold rows are the cloud-descent layer that shapes the local footprint; faint rows are higher winds that loft fine particles regionally.</p>`;
+  windProfileEl.hidden = false;
 }
 
 function placeGzMarker(lat: number, lon: number): void {

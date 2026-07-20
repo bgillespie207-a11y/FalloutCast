@@ -44,6 +44,20 @@ class WeatherProvenance(BaseModel):
     age_seconds: Optional[int] = None     # staleness of the (possibly cached) winds
 
 
+class WindProfilePoint(BaseModel):
+    """One pressure level of the fetched vertical wind profile, for the UI's
+    wind-by-altitude visualization."""
+
+    height_m: float
+    height_kft: float
+    speed_mph: float
+    from_deg: float             # meteorological "from" direction
+    toward_deg: float           # compass bearing the wind carries fallout TOWARD
+    in_fallout_layer: bool      # within the stabilized-cloud descent layer that
+    #                             shapes the local footprint (reduce_profile's
+    #                             averaging layer); higher levels loft fines away
+
+
 class PlumeResponse(BaseModel):
     ground_zero: list[float]  # [lon, lat]
     tier_requested: int
@@ -53,6 +67,7 @@ class PlumeResponse(BaseModel):
     notes: list[str] = []
     fraction_aloft: Optional[float] = None  # Tier-1 only: activity gone regional/global
     weather: Optional[WeatherProvenance] = None  # None for manual wind (nothing fetched)
+    wind_profile: Optional[list[WindProfilePoint]] = None  # None for manual wind
     contours: dict  # GeoJSON FeatureCollection
 
 
