@@ -272,6 +272,9 @@ button:disabled {
 #export-btn {
   background: #444;
 }
+#report-btn {
+  background: #556;
+}
 #overview-btn {
   background: #33506b;
 }

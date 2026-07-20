@@ -14,6 +14,7 @@ import {
   type PlumeResponse,
   type PointExposureResponse,
   type WeatherProvenance,
+  type YieldPolicy,
   type GeoJsonFeatureCollection,
   type TargetDeckMeta,
 } from "./api";
@@ -166,6 +167,7 @@ const timeSlider = document.getElementById("time-slider") as HTMLInputElement;
 const timeLabel = document.getElementById("time-label") as HTMLSpanElement;
 const legendEl = document.getElementById("legend") as HTMLDivElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
+const reportBtn = document.getElementById("report-btn") as HTMLButtonElement;
 const overviewBtn = document.getElementById("overview-btn") as HTMLButtonElement;
 overviewBtn.addEventListener("click", () => returnToOverview());
 const shareBtn = document.getElementById("share-btn") as HTMLButtonElement;
@@ -428,12 +430,14 @@ function clearResults(): void {
   inspectContext = null;
   currentPlume = null;
   exportGeoJson = null;
+  exportReport = null;
   notesEl.innerHTML = "";
   legendEl.innerHTML = "";
   clearContourTable();
   renderWeather(null);
   timeControl.hidden = true;
   exportBtn.hidden = true;
+  reportBtn.hidden = true;
   shareBtn.hidden = true;
   overviewBtn.hidden = true;
 }
@@ -690,6 +694,7 @@ async function computeEnsembleBand(): Promise<void> {
   statusEl.classList.add("busy");
   timeControl.hidden = true; // probability band has no decay slider
   exportBtn.hidden = true;
+  reportBtn.hidden = true;
   shareBtn.hidden = true;
   currentPlume = null;
   closeExposure();
@@ -728,9 +733,26 @@ async function computeEnsembleBand(): Promise<void> {
     statusEl.textContent = `P(H+1 dose rate ≥ ${resp.level_rhr} R/hr) across ${resp.n_members} members.`;
     renderWeather(null); // ensemble responses carry no single-forecast provenance
     renderPlainNotes(resp.notes);
-    renderEnsembleContours(resp.contours, resp.ground_zero);
+    const ensRows = renderEnsembleContours(resp.contours, resp.ground_zero);
     exportGeoJson = resp.contours;
+    exportReport = {
+      mode: "ensemble",
+      title: "Ensemble uncertainty band",
+      generatedIso: new Date().toISOString(),
+      facts: [
+        ["Ground zero", fmtLonLat(resp.ground_zero)],
+        ["Yield", `${Number(yieldInput.value)} Mt`],
+        ["Fission fraction", String(Number(ffInput.value))],
+        ["Banded dose level", `${resp.level_rhr} R/hr at H+1`],
+        ["Ensemble members", String(resp.n_members)],
+      ],
+      reachCaption: "Probability-band reach (H+1)",
+      reach: ensRows.map(reachRowPlain),
+      notes: resp.notes,
+      disclaimer: resp.disclaimer,
+    };
     exportBtn.hidden = false;
+    reportBtn.hidden = false;
     shareBtn.hidden = false;
     overviewBtn.hidden = false;
     fitToFeatures(resp.contours, [resp.ground_zero[0], resp.ground_zero[1]]);
@@ -751,6 +773,7 @@ async function computeSinglePlume(): Promise<void> {
   statusEl.classList.add("busy");
   timeControl.hidden = true;
   exportBtn.hidden = true;
+  reportBtn.hidden = true;
   shareBtn.hidden = true;
 
   const tierInput = form.querySelector<HTMLInputElement>('input[name="tier"]:checked');
@@ -807,8 +830,32 @@ async function computeSinglePlume(): Promise<void> {
     statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}.${inspectHint}`;
     renderWeather(resp.weather);
     renderNotes(resp);
+    const plumeNotes = [...resp.notes];
+    if (resp.fraction_aloft != null && resp.fraction_aloft > 0.01) {
+      plumeNotes.push(
+        `${(resp.fraction_aloft * 100).toFixed(0)}% of activity carried past the local footprint (regional/global).`,
+      );
+    }
+    exportReport = {
+      mode: "plume",
+      title: "Single-location fallout plume",
+      generatedIso: new Date().toISOString(),
+      facts: [
+        ["Ground zero", fmtLonLat(resp.ground_zero)],
+        ["Yield", `${yieldMt} Mt`],
+        ["Fission fraction", String(ff)],
+        ["Model", TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`],
+        ["Wind", describeWind(resp)],
+        ...(resp.weather ? ([["Weather", weatherFactStr(resp.weather)]] as [string, string][]) : []),
+      ],
+      // reach + displayTime are filled by renderAtCurrentTime (they depend on
+      // the decay slider), which runs immediately below.
+      notes: plumeNotes,
+      disclaimer: resp.disclaimer,
+    };
     timeControl.hidden = false;
     exportBtn.hidden = false;
+    reportBtn.hidden = false;
     shareBtn.hidden = false;
     overviewBtn.hidden = false;
     timeSlider.value = "0";
@@ -831,6 +878,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
   statusEl.classList.add("busy");
   timeControl.hidden = true; // envelope has no dense level set -- no decay slider
   exportBtn.hidden = true;
+  reportBtn.hidden = true;
   shareBtn.hidden = true;
   clearGzMarker();
   currentPlume = null;
@@ -867,7 +915,28 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
       included_target_ids: resp.included_target_ids,
       excluded_target_ids: resp.excluded_target_ids,
     } as GeoJsonFeatureCollection;
+    exportReport = {
+      mode: "exchange",
+      title: "National fallout envelope",
+      generatedIso: new Date().toISOString(),
+      facts: [
+        ["Aggregation", `${resp.aggregation} (worst H+1 dose from any one target)`],
+        ["Targets included", String(resp.n_targets)],
+        ["Targets excluded (wind-fetch fail)", String(resp.excluded_target_ids.length)],
+        [
+          "Target deck",
+          `${resp.deck_version}${deckMeta ? ` (hash ${deckMeta.content_hash.slice(0, 8)})` : ""}`,
+        ],
+        ...(resp.weather ? ([["Weather", weatherFactStr(resp.weather)]] as [string, string][]) : []),
+      ],
+      yieldPolicy: resp.yield_policy,
+      // The surface-burst caveat is already printed under the yields table;
+      // drop it from notes so the report doesn't repeat it verbatim.
+      notes: resp.notes.filter((n) => n !== resp.yield_policy.surface_burst_caveat),
+      disclaimer: resp.disclaimer,
+    };
     exportBtn.hidden = false;
+    reportBtn.hidden = false;
     shareBtn.hidden = false;
     overviewBtn.hidden = false;
   } catch (err) {
@@ -1143,7 +1212,9 @@ function renderStaticContours(fc: GeoJsonFeatureCollection): void {
 // --- ensemble uncertainty bands ---------------------------------------------
 // Exceedance-probability contours (10/50/90%): nested lines from faint outer
 // edge to saturated core, inner (more-likely) bands drawn thicker.
-function renderEnsembleContours(fc: GeoJsonFeatureCollection, gz: [number, number]): void {
+// Returns the per-band reach rows so the caller can carry them into the export
+// report (same data the on-screen table shows).
+function renderEnsembleContours(fc: GeoJsonFeatureCollection, gz: [number, number]): ContourRow[] {
   const widthExpr = ["+", 2, ["*", 3, ["to-number", ["get", "exceedance_probability"], 0.5]]];
   setContours(fc, colorMatchExpr("exceedance_probability", PROB_COLORS), widthExpr);
   const probs = [...new Set(fc.features.map((f) => f.properties.exceedance_probability))].sort(
@@ -1166,6 +1237,7 @@ function renderEnsembleContours(fc: GeoJsonFeatureCollection, gz: [number, numbe
     }
   }
   renderContourTable("Probability-band reach (H+1)", rows);
+  return rows;
 }
 
 function renderEnsembleLegend(probs: number[]): void {
@@ -1263,6 +1335,13 @@ function renderAtCurrentTime(): void {
   renderContourTable(`Contour reach at ${timeLabel.textContent}`, rows);
 
   exportGeoJson = displayed;
+  // The exported contours are at the currently-shown decay time, so the report's
+  // reach + time follow the slider.
+  if (exportReport && exportReport.mode === "plume") {
+    exportReport.displayTime = timeLabel.textContent ?? undefined;
+    exportReport.reachCaption = `Contour reach at ${timeLabel.textContent}`;
+    exportReport.reach = rows.map(reachRowPlain);
+  }
 }
 
 function availableLevels(fc: GeoJsonFeatureCollection): number[] {
@@ -1560,28 +1639,157 @@ function renderExposure(resp: PointExposureResponse): void {
   exposureNotesEl.innerText = resp.notes.join("\n\n");
 }
 
-// --- GeoJSON export ----------------------------------------------------------
+// --- export: GeoJSON + human-readable report ---------------------------------
+// Every compute records a self-describing report (assumptions, versions,
+// timestamp, units, limits) alongside the contours (backlog #23). The GeoJSON
+// download embeds it as a top-level `metadata` member; a second button
+// downloads the same as a human-readable Markdown report. Both cover all three
+// modes (single plume / ensemble / national envelope).
 
 let exportGeoJson: GeoJsonFeatureCollection | null = null;
 
-// Verified working (2026-07-16) by instrumenting HTMLAnchorElement.click and
-// URL.createObjectURL in the live app: the click fires with the .geojson
-// filename and the blob parses as a valid FeatureCollection. The earlier
-// review couldn't observe it only because automated browsers suppress the
-// actual file save.
-exportBtn.addEventListener("click", () => {
-  if (!exportGeoJson) return;
-  const blob = new Blob([JSON.stringify(exportGeoJson, null, 2)], {
-    type: "application/geo+json",
-  });
+interface ReachRow {
+  label: string;
+  km: number;
+  bearingDeg: number;
+}
+
+interface ExportReport {
+  mode: "plume" | "ensemble" | "exchange";
+  title: string;
+  generatedIso: string;
+  facts: [string, string][]; // ordered label/value assumption pairs
+  displayTime?: string; // plume: the decay time the exported contours are at
+  reachCaption?: string;
+  reach?: ReachRow[];
+  yieldPolicy?: YieldPolicy; // envelope: per-class attacker yields
+  notes: string[];
+  disclaimer: string;
+}
+
+let exportReport: ExportReport | null = null;
+
+const UNITS_NOTE =
+  "Units: distances in km (miles in parentheses); dose rate in R/hr " +
+  "(roentgen/hour, ~rem/hr whole-body); accumulated dose in R; times are hours " +
+  "after burst (H+1 = one hour after detonation).";
+
+function fmtLonLat(gz: [number, number]): string {
+  return `${gz[1].toFixed(4)}, ${gz[0].toFixed(4)} (lat, lon)`;
+}
+
+function reachRowPlain(r: ContourRow): ReachRow {
+  return { label: r.label, km: r.km, bearingDeg: r.bearing };
+}
+
+function weatherFactStr(w: WeatherProvenance): string {
+  const age = w.age_seconds != null ? `, fetched ${describeAge(w.age_seconds)}` : "";
+  return `${w.model}, valid ${w.valid_time}Z${age}`;
+}
+
+function round1(v: number): number {
+  return Math.round(v * 10) / 10;
+}
+
+// Structured, self-describing metadata block embedded in the exported GeoJSON.
+function exportMetadata(r: ExportReport): Record<string, unknown> {
+  return {
+    generated: r.generatedIso,
+    app: `FalloutCast ${__APP_VERSION__}`,
+    api_url: __API_URL__,
+    mode: r.mode,
+    title: r.title,
+    assumptions: Object.fromEntries(r.facts),
+    ...(r.displayTime ? { display_time: r.displayTime } : {}),
+    ...(r.reach
+      ? {
+          contour_reach: r.reach.map((x) => ({
+            band: x.label,
+            max_reach_km: round1(x.km),
+            max_reach_mi: round1(x.km * 0.621371),
+            toward_deg: Math.round(x.bearingDeg),
+            toward_compass: compassName(x.bearingDeg),
+          })),
+        }
+      : {}),
+    ...(r.yieldPolicy ? { yield_policy: r.yieldPolicy } : {}),
+    notes: r.notes,
+    units: UNITS_NOTE,
+    disclaimer: r.disclaimer,
+  };
+}
+
+function reportMarkdown(r: ExportReport): string {
+  const lines: string[] = [];
+  lines.push(`# FalloutCast — ${r.title}`, "");
+  lines.push(`_Planning estimate, not an operational product. Generated ${r.generatedIso}._`, "");
+  lines.push(`**App:** FalloutCast ${__APP_VERSION__} · **API:** ${__API_URL__}`, "");
+
+  lines.push("## Inputs & assumptions", "");
+  for (const [k, v] of r.facts) lines.push(`- **${k}:** ${v}`);
+  lines.push("");
+
+  if (r.reach && r.reach.length > 0) {
+    lines.push(`## ${r.reachCaption ?? "Contour reach"}`, "");
+    lines.push("| Band | Max reach from GZ | Toward |", "| --- | --- | --- |");
+    for (const x of r.reach) {
+      lines.push(
+        `| ${x.label} | ${formatReach(x.km)} | ${compassName(x.bearingDeg)} (${Math.round(x.bearingDeg)}°) |`,
+      );
+    }
+    lines.push("");
+  }
+
+  if (r.yieldPolicy?.assumptions?.length) {
+    lines.push("## Attack-scenario yields (per target class)", "");
+    lines.push(`Scenario: **${r.yieldPolicy.scenario}** (${r.yieldPolicy.mode}). Illustrative attacker assumptions, not the targets' own weapons.`, "");
+    lines.push("| Class | Nominal | Range | Fission |", "| --- | --- | --- | --- |");
+    for (const a of r.yieldPolicy.assumptions) {
+      lines.push(
+        `| ${a.category} | ${a.yield_mt} Mt | ${a.yield_min_mt}–${a.yield_max_mt} Mt | ${a.fission_fraction} |`,
+      );
+    }
+    lines.push("", `_${r.yieldPolicy.surface_burst_caveat}_`, "");
+  }
+
+  if (r.notes.length > 0) {
+    lines.push("## Notes", "");
+    for (const n of r.notes) lines.push(`- ${n}`);
+    lines.push("");
+  }
+
+  lines.push("## Units & limitations", "");
+  lines.push(UNITS_NOTE, "");
+  lines.push(r.disclaimer, "");
+  return lines.join("\n");
+}
+
+function downloadBlob(text: string, filename: string, mime: string): void {
+  const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "falloutcast-contours.geojson";
+  a.download = filename;
   a.click();
   // Deferred: revoking synchronously races the download engine's read of the
   // blob in some browsers (the FileSaver-style guard).
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// Verified working (2026-07-16) by instrumenting HTMLAnchorElement.click and
+// URL.createObjectURL in the live app: the click fires with the .geojson
+// filename and the blob parses as a valid FeatureCollection.
+exportBtn.addEventListener("click", () => {
+  if (!exportGeoJson) return;
+  const withMeta = exportReport
+    ? { ...exportGeoJson, metadata: exportMetadata(exportReport) }
+    : exportGeoJson;
+  downloadBlob(JSON.stringify(withMeta, null, 2), "falloutcast-contours.geojson", "application/geo+json");
+});
+
+reportBtn.addEventListener("click", () => {
+  if (!exportReport) return;
+  downloadBlob(reportMarkdown(exportReport), "falloutcast-report.md", "text/markdown");
 });
 
 // --- weather provenance + manual refresh ---------------------------------------

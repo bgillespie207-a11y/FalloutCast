@@ -106,15 +106,20 @@ loading after the last styledata event, e.g. in a background tab.)
   (city, address, HI/AK site) resolves via the keyless Nominatim geocoder
   (`geocodePlace` in api.ts). Sets GZ inputs + flies the map + shows the
   resolved name.
+- Richer exported report: every compute records an `exportReport`
+  (assumptions/versions/timestamp/units/limits) in main.ts. The GeoJSON export
+  embeds it as a top-level `metadata` member; a new "Download report" button
+  writes the same as human-readable Markdown (`falloutcast-report.md`). Covers
+  all three modes — plume (reach table follows the decay slider), ensemble
+  (probability-band reach), and envelope (per-class yield policy table). App
+  version comes from a new `__APP_VERSION__` Vite define (package.json);
+  changing vite.config requires a dev-server restart to take effect.
 
 **Remaining:**
 - **Wind arrows / altitude-profile** viz (the profile is fetched in `openmeteo`).
 - **Metric/US unit switch** (miles↔km, R↔Sv-ish). Several displays already show
-  both km and mi (contour table, exposure panel, scale bars).
-- **Richer exported report** (assumptions/versions/timestamps/units/limits) —
-  the envelope export already carries weather/aggregation/yield_policy/deck
-  version/in-excluded IDs; extend to a human-readable report and cover the
-  single-plume/ensemble exports too.
+  both km and mi (contour table, exposure panel, scale bars, and now the
+  exported report).
 
 ## Architecture map (where things live)
 
