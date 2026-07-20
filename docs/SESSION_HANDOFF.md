@@ -100,11 +100,17 @@ loading after the last styledata event, e.g. in a background tab.)
   (`?mode=ensemble&level=&members=`, `wind=speed,bearing,shear`) + a
   "Copy scenario link" button with a no-clipboard fallback.
 
+**Also done (2026-07-20):**
+- Place/address search: the ZIP box is now a general "Find a place, address, or
+  ZIP" search. 5-digit ZIPs keep the zippopotam fast path; everything else
+  (city, address, HI/AK site) resolves via the keyless Nominatim geocoder
+  (`geocodePlace` in api.ts). Sets GZ inputs + flies the map + shows the
+  resolved name.
+
 **Remaining:**
 - **Wind arrows / altitude-profile** viz (the profile is fetched in `openmeteo`).
 - **Metric/US unit switch** (miles↔km, R↔Sv-ish). Several displays already show
   both km and mi (contour table, exposure panel, scale bars).
-- **Place/address search** (currently only US ZIP via zippopotam + lat/lon).
 - **Richer exported report** (assumptions/versions/timestamps/units/limits) —
   the envelope export already carries weather/aggregation/yield_policy/deck
   version/in-excluded IDs; extend to a human-readable report and cover the

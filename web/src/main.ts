@@ -8,6 +8,7 @@ import {
   fetchTargets,
   fetchDeck,
   geocodeZip,
+  geocodePlace,
   ApiError,
   type ManualWind,
   type PlumeResponse,
@@ -140,8 +141,8 @@ function categoryColorExpr(): unknown {
 const form = document.getElementById("plume-form") as HTMLFormElement;
 const latInput = document.getElementById("lat") as HTMLInputElement;
 const lonInput = document.getElementById("lon") as HTMLInputElement;
-const zipInput = document.getElementById("zip") as HTMLInputElement;
-const zipLookupBtn = document.getElementById("zip-lookup-btn") as HTMLButtonElement;
+const locSearchInput = document.getElementById("loc-search") as HTMLInputElement;
+const locSearchBtn = document.getElementById("loc-search-btn") as HTMLButtonElement;
 const tabSingle = document.getElementById("tab-single") as HTMLButtonElement;
 const tabExchange = document.getElementById("tab-exchange") as HTMLButtonElement;
 const singleTargetFields = document.getElementById("single-target-fields") as HTMLElement;
@@ -492,38 +493,44 @@ for (const btn of presetButtons) {
 yieldInput.addEventListener("input", syncPresetSelection);
 syncPresetSelection();
 
-// --- ZIP code lookup ---------------------------------------------------------
+// --- location search ---------------------------------------------------------
+// One box for a place name, street address, or US ZIP. A 5-digit ZIP takes the
+// fast zippopotam path (US centroid); anything else -- a city, an address, a
+// site in Hawaii/Alaska -- goes to the Nominatim global geocoder. Sets the
+// ground-zero inputs and flies the map there, showing the resolved name so an
+// ambiguous match is visible (search again to correct it).
 
-zipLookupBtn.addEventListener("click", () => void lookupZip());
-zipInput.addEventListener("keydown", (e) => {
+locSearchBtn.addEventListener("click", () => void lookupLocation());
+locSearchInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    void lookupZip();
+    void lookupLocation();
   }
 });
 
-async function lookupZip(): Promise<void> {
-  const zip = zipInput.value.trim();
-  if (!/^\d{5}$/.test(zip)) {
-    statusEl.textContent = "Enter a 5-digit US ZIP code.";
+async function lookupLocation(): Promise<void> {
+  const query = locSearchInput.value.trim();
+  if (!query) {
+    statusEl.textContent = "Enter a place, address, or 5-digit ZIP to search.";
     statusEl.classList.add("error");
     return;
   }
-  zipLookupBtn.disabled = true;
-  statusEl.textContent = `Looking up ZIP ${zip}...`;
+  const isZip = /^\d{5}$/.test(query);
+  locSearchBtn.disabled = true;
+  statusEl.textContent = `Searching for ${query}…`;
   statusEl.classList.remove("error");
   try {
-    const loc = await geocodeZip(zip);
+    const loc = isZip ? await geocodeZip(query) : await geocodePlace(query);
     latInput.value = loc.lat.toFixed(4);
     lonInput.value = loc.lon.toFixed(4);
     map.flyTo({ center: [loc.lon, loc.lat], zoom: 8 });
-    statusEl.textContent = `ZIP ${zip} -> ${loc.place} (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
+    statusEl.textContent = `${loc.place} (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
-    statusEl.textContent = `ZIP lookup failed: ${msg}`;
+    statusEl.textContent = `Location search failed: ${msg}`;
     statusEl.classList.add("error");
   } finally {
-    zipLookupBtn.disabled = false;
+    locSearchBtn.disabled = false;
   }
 }
 

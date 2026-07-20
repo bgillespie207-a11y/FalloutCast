@@ -257,3 +257,25 @@ export async function geocodeZip(zip: string): Promise<ZipLocation> {
     place: `${place["place name"]}, ${place["state abbreviation"]}`,
   };
 }
+
+// Nominatim (OpenStreetMap): free, keyless, CORS-open global forward geocoder
+// for place names / addresses -- same "no API key/signup" bar as the ZIP
+// lookup, basemap, and wind data above. Called directly from the browser
+// (one request per explicit user action, well within Nominatim's 1 req/s
+// usage policy). Complements geocodeZip: ZIP centroids stay on zippopotam
+// (fast, US-specific); everything else -- "Cleveland", a street address, a
+// place in Hawaii/Alaska -- resolves here. `limit=1` takes the best match; the
+// resolved display name is surfaced so the user can see what it matched.
+export async function geocodePlace(query: string): Promise<ZipLocation> {
+  const params = new URLSearchParams({ format: "jsonv2", limit: "1", q: query });
+  const resp = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+  if (!resp.ok) throw new ApiError(`Place search HTTP ${resp.status}`);
+  const results = (await resp.json()) as Array<{
+    lat: string;
+    lon: string;
+    display_name: string;
+  }>;
+  const top = results[0];
+  if (!top) throw new ApiError(`No match for "${query}"`);
+  return { lat: Number(top.lat), lon: Number(top.lon), place: top.display_name };
+}

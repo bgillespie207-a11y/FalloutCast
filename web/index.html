@@ -63,19 +63,19 @@
             </label>
             <div class="zip-row">
               <label
-                >ZIP code (optional)
+                >Find a place, address, or ZIP
                 <input
                   type="text"
-                  id="zip"
-                  inputmode="numeric"
-                  pattern="[0-9]{5}"
-                  maxlength="5"
-                  placeholder="e.g. 82001"
+                  id="loc-search"
+                  placeholder="e.g. Cleveland OH, or Pearl Harbor, or 82001"
                 />
               </label>
-              <button type="button" id="zip-lookup-btn">Look up</button>
+              <button type="button" id="loc-search-btn">Search</button>
             </div>
-            <p class="hint">Click the map to set ground zero, type coordinates, or look up a ZIP code.</p>
+            <p class="hint">
+              Click the map to set ground zero, type coordinates, or search a
+              place / address / ZIP.
+            </p>
             <!-- Basic/Advanced split: location + yield are enough for a first
             plume; model choice, wind override, ensemble band and fission
             fraction are behind this disclosure (all default to sane values). -->
