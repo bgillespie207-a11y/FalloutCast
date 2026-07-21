@@ -124,11 +124,19 @@ loading after the last styledata event, e.g. in a background tab.)
   arrows per level, length ∝ speed, bold for the cloud-descent layer / faint
   for higher winds — makes shear visible. Hidden for manual wind (nothing
   fetched) and ensemble/envelope modes.
+- Metric/US unit switch: a persisted (localStorage `falloutcast.units`) global
+  toggle below the mode tabs. Distances stay dual but flip which is primary
+  (`formatReach`); wind speed switches km/h↔mph (`formatSpeed`/`formatSpeedShort`
+  in `describeWind` + wind profile); heights switch km↔kft; and metric mode adds
+  an approximate Sv to the exposure-panel doses (`svApprox`, labeled "1 R ≈ 10
+  mSv, whole-body gamma"). `applyUnits()` re-renders the on-screen table / wind
+  profile / exposure panel in place (state stored in `lastContourTable`,
+  `lastWindProfilePoints`, `lastExposureResp`) — no recompute.
 
-**Remaining:**
-- **Metric/US unit switch** (miles↔km, R↔Sv-ish). Several displays already show
-  both km and mi (contour table, exposure panel, scale bars, exported report,
-  wind profile). This is the last #23 item.
+**#23 is complete.** No tracked backlog items remain. (Ad-hoc follow-ups noted in
+git history if wanted: an optional "jump to Hawaii/Alaska" control so those
+plumes are discoverable without panning; revisiting the naval_base/air_base/
+missile_defense category split.)
 
 ## Architecture map (where things live)
 

@@ -508,6 +508,43 @@ button:disabled {
   margin-bottom: 0.4rem;
 }
 
+/* Global display-units toggle. */
+.units-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin: -0.4rem 0 0.8rem;
+}
+.units-label {
+  font-size: 0.75rem;
+  color: #666;
+}
+.units-seg {
+  display: inline-flex;
+  border: 1px solid #bbb;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.units-seg button {
+  width: auto;
+  min-height: 30px;
+  padding: 0.15rem 0.6rem;
+  background: #eceae6;
+  color: #333;
+  border: none;
+  border-radius: 0;
+  font-size: 0.75rem;
+}
+.units-seg button + button {
+  border-left: 1px solid #bbb;
+}
+.units-seg button[aria-checked="true"] {
+  background: #1a4d2e;
+  color: #fff;
+  font-weight: 600;
+}
+
 /* Wind-by-altitude viz. */
 #wind-profile {
   margin-top: 0.8rem;

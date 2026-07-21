@@ -185,6 +185,8 @@ shareBtn.addEventListener("click", async () => {
 });
 const notesEl = document.getElementById("notes") as HTMLDivElement;
 const windProfileEl = document.getElementById("wind-profile") as HTMLElement;
+const unitsMetricBtn = document.getElementById("units-metric") as HTMLButtonElement;
+const unitsUsBtn = document.getElementById("units-us") as HTMLButtonElement;
 const disclaimerToggle = document.getElementById("disclaimer-toggle") as HTMLButtonElement;
 const disclaimerFullEl = document.getElementById("disclaimer-full") as HTMLDivElement;
 const exposureSection = document.getElementById("exposure") as HTMLElement;
@@ -578,6 +580,65 @@ for (const tab of [tabSingle, tabExchange]) {
       other.click();
     }
   });
+}
+
+// --- display units ------------------------------------------------------------
+// A global preference (persisted) for whether distances/speeds read metric- or
+// US-first, and whether an approximate Sv dose reference is shown. Distances are
+// always shown in BOTH units; the toggle picks which is primary. Wind speed
+// switches km/h <-> mph. Dose stays in R (the model's native roentgen) with an
+// approximate Sv shown in metric mode -- clearly labeled, since R->Sv is only a
+// whole-body-gamma rule of thumb (1 R ~ 10 mSv effective).
+
+type UnitSystem = "metric" | "us";
+const UNITS_KEY = "falloutcast.units";
+let unitSystem: UnitSystem = localStorage.getItem(UNITS_KEY) === "us" ? "us" : "metric";
+
+const KM_PER_MI = 1.609344;
+const MSV_PER_R = 10; // ~1 R exposure ~ 10 mSv effective dose, whole-body gamma (approx)
+
+function fmtDist(v: number): string {
+  return v >= 10 ? v.toFixed(0) : v.toFixed(1);
+}
+
+// Wind speed, primary per preference with the other in parentheses.
+function formatSpeed(mph: number): string {
+  const kmh = mph * KM_PER_MI;
+  return unitSystem === "metric"
+    ? `${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)`
+    : `${mph.toFixed(0)} mph (${kmh.toFixed(0)} km/h)`;
+}
+// Compact, primary-unit-only speed for the wind-profile rows.
+function formatSpeedShort(mph: number): string {
+  return unitSystem === "metric" ? `${(mph * KM_PER_MI).toFixed(0)} km/h` : `${mph.toFixed(0)} mph`;
+}
+function formatHeightShort(p: WindProfilePoint): string {
+  return unitSystem === "metric" ? `${(p.height_m / 1000).toFixed(1)} km` : `${p.height_kft.toFixed(0)} kft`;
+}
+// Approximate SI dose for a roentgen figure (metric mode only).
+function svApprox(r: number): string {
+  const mSv = r * MSV_PER_R;
+  return mSv >= 1000 ? `${(mSv / 1000).toFixed(mSv >= 10000 ? 0 : 1)} Sv` : `${mSv.toFixed(mSv >= 10 ? 0 : 1)} mSv`;
+}
+
+function setUnitSystem(sys: UnitSystem): void {
+  unitSystem = sys;
+  localStorage.setItem(UNITS_KEY, sys);
+  unitsMetricBtn.setAttribute("aria-checked", String(sys === "metric"));
+  unitsUsBtn.setAttribute("aria-checked", String(sys === "us"));
+  applyUnits();
+}
+unitsMetricBtn.addEventListener("click", () => setUnitSystem("metric"));
+unitsUsBtn.addEventListener("click", () => setUnitSystem("us"));
+// Reflect the persisted choice on load (no re-render needed before any result).
+unitsMetricBtn.setAttribute("aria-checked", String(unitSystem === "metric"));
+unitsUsBtn.setAttribute("aria-checked", String(unitSystem === "us"));
+
+// Re-render whatever unit-bearing result is on screen, in place (no recompute).
+function applyUnits(): void {
+  if (lastContourTable) renderContourTable(lastContourTable.caption, lastContourTable.rows);
+  if (lastWindProfilePoints) renderWindProfile(lastWindProfilePoints);
+  if (lastExposureResp && !exposureSection.hidden) renderExposure(lastExposureResp);
 }
 
 async function computePlume(): Promise<void> {
@@ -1051,7 +1112,7 @@ function readUrlState(): void {
 function describeWind(resp: PlumeResponse): string {
   const w = resp.wind;
   if (w.speed_mph == null) return w.source;
-  return `${w.speed_mph.toFixed(0)} mph @ ${w.bearing_deg?.toFixed(0)}° (${w.source})`;
+  return `${formatSpeed(w.speed_mph)} @ ${w.bearing_deg?.toFixed(0)}° (${w.source})`;
 }
 
 function renderNotes(resp: PlumeResponse): void {
@@ -1090,13 +1151,17 @@ function renderPlainNotes(notes: string[]): void {
 function clearWindProfile(): void {
   windProfileEl.hidden = true;
   windProfileEl.innerHTML = "";
+  lastWindProfilePoints = null;
 }
+
+let lastWindProfilePoints: WindProfilePoint[] | null = null;
 
 function renderWindProfile(points: WindProfilePoint[]): void {
   if (points.length === 0) {
     clearWindProfile();
     return;
   }
+  lastWindProfilePoints = points;
   // Highest altitude first (top of the column).
   const rows = [...points].sort((a, b) => b.height_m - a.height_m);
   const maxSpeed = Math.max(1, ...rows.map((p) => p.speed_mph));
@@ -1132,17 +1197,17 @@ function renderWindProfile(points: WindProfilePoint[]): void {
         `</g>`,
     );
     parts.push(
-      `<text x="6" y="${cy}" font-size="11" fill="${color}" dominant-baseline="middle">${p.height_kft.toFixed(0)} kft</text>`,
+      `<text x="6" y="${cy}" font-size="11" fill="${color}" dominant-baseline="middle">${formatHeightShort(p)}</text>`,
     );
     parts.push(
-      `<text x="${W - 6}" y="${cy}" font-size="11" fill="${color}" text-anchor="end" dominant-baseline="middle">${p.speed_mph.toFixed(0)} mph</text>`,
+      `<text x="${W - 6}" y="${cy}" font-size="11" fill="${color}" text-anchor="end" dominant-baseline="middle">${formatSpeedShort(p.speed_mph)}</text>`,
     );
   });
 
   const surface = rows[rows.length - 1];
   const ariaLabel =
-    `Wind by altitude, ${rows.length} levels. Surface ${surface.speed_mph.toFixed(0)} mph toward ` +
-    `${compassName(surface.toward_deg)}; top level ${rows[0].speed_mph.toFixed(0)} mph toward ${compassName(rows[0].toward_deg)}.`;
+    `Wind by altitude, ${rows.length} levels. Surface ${formatSpeedShort(surface.speed_mph)} toward ` +
+    `${compassName(surface.toward_deg)}; top level ${formatSpeedShort(rows[0].speed_mph)} toward ${compassName(rows[0].toward_deg)}.`;
 
   windProfileEl.innerHTML =
     `<div class="legend-title">Wind by altitude</div>` +
@@ -1542,10 +1607,12 @@ function farthestPoint(
   return best;
 }
 
+// Distance in both units, primary per the units preference.
 function formatReach(km: number): string {
-  const mi = km * 0.621371;
-  const f = (v: number) => (v >= 10 ? v.toFixed(0) : v.toFixed(1));
-  return `${f(km)} km (${f(mi)} mi)`;
+  const mi = km / KM_PER_MI;
+  return unitSystem === "metric"
+    ? `${fmtDist(km)} km (${fmtDist(mi)} mi)`
+    : `${fmtDist(mi)} mi (${fmtDist(km)} km)`;
 }
 
 interface ContourRow {
@@ -1555,8 +1622,11 @@ interface ContourRow {
   bearing: number;
 }
 
+let lastContourTable: { caption: string; rows: ContourRow[] } | null = null;
+
 function renderContourTable(caption: string, rows: ContourRow[]): void {
   contourTableEl.innerHTML = "";
+  lastContourTable = rows.length > 0 ? { caption, rows } : null;
   if (rows.length === 0) return;
   const table = document.createElement("table");
   const cap = document.createElement("caption");
@@ -1597,6 +1667,7 @@ function renderContourTable(caption: string, rows: ContourRow[]): void {
 
 function clearContourTable(): void {
   contourTableEl.innerHTML = "";
+  lastContourTable = null;
 }
 
 // --- point-exposure panel -----------------------------------------------------
@@ -1617,6 +1688,7 @@ function fmtNum(v: number): string {
 function closeExposure(): void {
   exposureSection.hidden = true;
   inspectPoint = null;
+  lastExposureResp = null;
   inspectSeq++; // any in-flight assessment is now stale
   if (inspectMarker) {
     inspectMarker.remove();
@@ -1680,7 +1752,16 @@ async function inspectExposure(lat: number, lon: number): Promise<void> {
   }
 }
 
+let lastExposureResp: PointExposureResponse | null = null;
+
+// A roentgen dose figure, with an approximate Sv appended in metric mode.
+function fmtDose(r: number): string {
+  const base = `${fmtNum(r)} R`;
+  return unitSystem === "metric" ? `${base} (≈ ${svApprox(r)})` : base;
+}
+
 function renderExposure(resp: PointExposureResponse): void {
+  lastExposureResp = resp;
   const km = resp.distance_miles * MI_TO_KM;
   const dir = `${compassName(resp.bearing_from_gz_deg)} (${Math.round(resp.bearing_from_gz_deg)}°)`;
 
@@ -1709,18 +1790,23 @@ function renderExposure(resp: PointExposureResponse): void {
   const doseLines: string[] = [];
   if (resp.unsheltered_dose_window_r != null) {
     doseLines.push(
-      `Outdoors from arrival until ${exitLabel}: ${fmtNum(resp.unsheltered_dose_window_r)} R`,
+      `Outdoors from arrival until ${exitLabel}: ${fmtDose(resp.unsheltered_dose_window_r)}`,
     );
     if (pf > 1 && resp.sheltered_dose_window_r != null) {
-      doseLines.push(`Same window behind PF ${pf}: ${fmtNum(resp.sheltered_dose_window_r)} R`);
+      doseLines.push(`Same window behind PF ${pf}: ${fmtDose(resp.sheltered_dose_window_r)}`);
     }
   }
   doseLines.push(
-    `Outdoors indefinitely from arrival: ${fmtNum(resp.unsheltered_dose_to_infinity_r)} R` +
-      (pf > 1 ? ` (PF ${pf}: ${fmtNum(resp.sheltered_dose_to_infinity_r)} R)` : ""),
+    `Outdoors indefinitely from arrival: ${fmtDose(resp.unsheltered_dose_to_infinity_r)}` +
+      (pf > 1 ? ` (PF ${pf}: ${fmtDose(resp.sheltered_dose_to_infinity_r)})` : ""),
   );
   exposureDosesEl.innerText = doseLines.join("\n");
-  exposureNotesEl.innerText = resp.notes.join("\n\n");
+
+  const notes = [...resp.notes];
+  if (unitSystem === "metric") {
+    notes.push("Sv figures approximate: 1 R ≈ 10 mSv effective dose (whole-body gamma).");
+  }
+  exposureNotesEl.innerText = notes.join("\n\n");
 }
 
 // --- export: GeoJSON + human-readable report ---------------------------------
@@ -1754,9 +1840,9 @@ interface ExportReport {
 let exportReport: ExportReport | null = null;
 
 const UNITS_NOTE =
-  "Units: distances in km (miles in parentheses); dose rate in R/hr " +
-  "(roentgen/hour, ~rem/hr whole-body); accumulated dose in R; times are hours " +
-  "after burst (H+1 = one hour after detonation).";
+  "Units: distances shown in both km and mi; dose rate in R/hr (roentgen/hour, " +
+  "~rem/hr whole-body); accumulated dose in R (1 R ≈ 10 mSv effective, whole-body " +
+  "gamma); times are hours after burst (H+1 = one hour after detonation).";
 
 function fmtLonLat(gz: [number, number]): string {
   return `${gz[1].toFixed(4)}, ${gz[0].toFixed(4)} (lat, lon)`;

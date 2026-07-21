@@ -45,6 +45,17 @@
           </button>
         </div>
 
+        <!-- Global display-units preference (persisted). Distances already show
+        both; this picks which is primary and switches wind speed + adds an
+        approximate Sv dose reference. -->
+        <div class="units-row" role="radiogroup" aria-label="Display units">
+          <span class="units-label">Units</span>
+          <div class="units-seg">
+            <button type="button" id="units-metric" role="radio" aria-checked="true">Metric</button>
+            <button type="button" id="units-us" role="radio" aria-checked="false">US</button>
+          </div>
+        </div>
+
         <form id="plume-form">
           <div id="single-target-fields">
             <!-- step="any" throughout: a fixed decimal step (e.g. 0.01) makes
