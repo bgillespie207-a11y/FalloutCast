@@ -53,6 +53,7 @@ const TARGET_COLORS: Record<string, [number, number, number, number]> = {
   ssbn_base: [0, 130, 150, 220],
   naval_base: [70, 130, 180, 220],   // surface/attack-sub fleet (e.g. Pearl Harbor)
   air_base: [150, 100, 205, 220],    // military airfield (e.g. Eielson, JBER)
+  army_base: [130, 110, 75, 220],    // Army/Marine ground-force post (khaki)
   missile_defense: [20, 160, 110, 225], // GMD interceptors / early-warning radar
   storage: [120, 120, 130, 220],
   command: [200, 40, 40, 235],       // government / C2
@@ -92,6 +93,7 @@ const TARGET_LABELS: Record<string, string> = {
   ssbn_base: "SSBN base",
   naval_base: "Naval base",
   air_base: "Air base",
+  army_base: "Army / Marine base",
   missile_defense: "Missile defense / warning",
   storage: "Weapons storage",
   command: "Government / C2",

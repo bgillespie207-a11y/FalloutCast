@@ -60,7 +60,7 @@ from .targets import load_targets
 # This is a VERSIONED dataset, not a one-off: silo geography is expected to be
 # refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
 # facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
-DATASET_VERSION = "2025.6-hi-ak-infra"
+DATASET_VERSION = "2025.7-major-bases"
 VERIFY_DATE = "2026-07-13"
 # Date of the most recent HVT (population/economic/C2) curation pass. Kept
 # SEPARATE from VERIFY_DATE on purpose: the metro-population expansion below was
@@ -277,10 +277,12 @@ def generate_all_fields() -> list[Target]:
 
 # --- High-value targets (public) ---------------------------------------------
 # Major population centers, economic/industrial nodes (incl. critical
-# infrastructure like the largest dams), government C2, and the major Hawaii /
-# Alaska military installations. City coordinates are ordinary public geography;
-# the government/industrial/military sites are publicly documented locations.
-# Categories drive the frontend styling/legend and the per-class scenario yield.
+# infrastructure like the largest dams), government C2, the major Hawaii /
+# Alaska military installations, and strategically significant / large CONUS
+# military bases (air, ground, naval, command). City coordinates are ordinary
+# public geography; the government/industrial/military sites are publicly
+# documented locations. Categories drive the frontend styling/legend and the
+# per-class scenario yield.
 
 # (name, lon, lat, category, note)
 #
@@ -386,6 +388,57 @@ _HVT: list[tuple[str, float, float, str, str]] = [
      "Ground-based Midcourse Defense interceptor field -- homeland missile defense (AK)"),
     ("Clear Space Force Station", -149.190, 64.300, "missile_defense",
      "early-warning radar (BMEWS / Long Range Discrimination Radar) (AK)"),
+
+    # --- Major CONUS military installations ----------------------------------
+    # Strategically significant and/or large-population (~10k+ personnel) bases
+    # that the earlier deck missed. Publicly documented installations; the
+    # coordinates are ordinary public geography (installation centroids) and the
+    # notes describe the base's public role -- no troop counts are asserted as
+    # sourced data. Counterforce/military class in the scenario (illustrative).
+    # Curated and incomplete, like the rest of the deck.
+    #
+    # Air Force / Space
+    ("Wright-Patterson AFB", -84.048, 39.813, "air_base",
+     "Air Force Materiel Command HQ; Nat'l Air & Space Intelligence Center (Dayton, OH)"),
+    ("Hill AFB", -111.973, 41.124, "air_base",
+     "ICBM (Minuteman III) sustainment; F-35 (Ogden, UT)"),
+    ("Tinker AFB", -97.386, 35.417, "air_base",
+     "major logistics depot; E-3 AWACS / E-6 airborne command post (Oklahoma City, OK)"),
+    ("Vandenberg SFB", -120.573, 34.742, "air_base",
+     "ICBM flight testing + Western space launch range (CA)"),
+    ("Ellsworth AFB", -103.104, 44.145, "bomber_base",
+     "28th Bomb Wing, B-1 bombers (Rapid City, SD)"),
+    ("Dyess AFB", -99.854, 32.421, "bomber_base",
+     "7th Bomb Wing, B-1 bombers (Abilene, TX)"),
+    # Army / Marine ground-force posts
+    ("Fort Liberty (Fort Bragg)", -79.006, 35.139, "army_base",
+     "XVIII Airborne Corps, 82nd Airborne, Army special operations (Fayetteville, NC)"),
+    ("Fort Cavazos (Fort Hood)", -97.775, 31.135, "army_base",
+     "III Armored Corps, 1st Cavalry Division (Killeen, TX)"),
+    ("Fort Campbell", -87.462, 36.668, "army_base",
+     "101st Airborne Division (Air Assault) (KY/TN)"),
+    ("Joint Base Lewis-McChord", -122.581, 47.086, "army_base",
+     "I Corps + McChord airlift (Tacoma, WA)"),
+    ("Fort Bliss", -106.421, 31.813, "army_base",
+     "1st Armored Division; air-defense center (El Paso, TX)"),
+    ("Fort Moore (Fort Benning)", -84.952, 32.353, "army_base",
+     "Infantry & Armor center (Columbus, GA)"),
+    ("Fort Carson", -104.788, 38.738, "army_base",
+     "4th Infantry Division (Colorado Springs, CO)"),
+    ("MCB Camp Lejeune", -77.351, 34.601, "army_base",
+     "Marine Corps -- II MEF ground forces (Jacksonville, NC)"),
+    ("MCB Camp Pendleton", -117.400, 33.350, "army_base",
+     "Marine Corps -- I MEF ground forces (Oceanside, CA)"),
+    # Navy
+    ("Naval Submarine Base New London", -72.088, 41.398, "naval_base",
+     "primary East Coast attack-submarine base; Submarine Force HQ (Groton, CT)"),
+    ("Portsmouth Naval Shipyard", -70.739, 43.079, "naval_base",
+     "nuclear-submarine overhaul/refueling shipyard (Kittery, ME)"),
+    ("Naval Base San Diego", -117.130, 32.680, "naval_base",
+     "major Pacific Fleet surface-ship homeport (San Diego, CA)"),
+    # Command / intelligence
+    ("Fort Meade", -76.741, 39.108, "command",
+     "National Security Agency / US Cyber Command (MD)"),
 ]
 
 

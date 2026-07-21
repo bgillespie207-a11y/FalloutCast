@@ -100,6 +100,7 @@ DEFAULT_SCENARIO: dict[str, YieldAssumption] = {
     "ssbn_base": YieldAssumption("ssbn_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE),
     "naval_base": YieldAssumption("naval_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
     "air_base": YieldAssumption("air_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
+    "army_base": YieldAssumption("army_base", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
     "missile_defense": YieldAssumption("missile_defense", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE_MIL),
     "storage": YieldAssumption("storage", 0.30, 0.30, 0.50, 0.5, _COUNTERFORCE),
     "command": YieldAssumption("command", 0.50, 0.30, 1.00, 0.5, _COUNTERVALUE),
