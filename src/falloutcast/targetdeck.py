@@ -60,7 +60,7 @@ from .targets import load_targets
 # This is a VERSIONED dataset, not a one-off: silo geography is expected to be
 # refined over time (the USAF began a supplemental Sentinel EIS in 2025 for
 # facility siting). Bump DATASET_VERSION and VERIFY_DATE when the data changes.
-DATASET_VERSION = "2025.7-major-bases"
+DATASET_VERSION = "2025.8-more-bases"
 VERIFY_DATE = "2026-07-13"
 # Date of the most recent HVT (population/economic/C2) curation pass. Kept
 # SEPARATE from VERIFY_DATE on purpose: the metro-population expansion below was
@@ -439,6 +439,40 @@ _HVT: list[tuple[str, float, float, str, str]] = [
     # Command / intelligence
     ("Fort Meade", -76.741, 39.108, "command",
      "National Security Agency / US Cyber Command (MD)"),
+
+    # --- Additional major installations (second pass) ------------------------
+    # Combatant-command HQs and further large posts. Same standard: public
+    # geography, public role in the note, no asserted troop counts.
+    #
+    # Combatant-command headquarters (strategic C2)
+    ("MacDill AFB", -82.521, 27.849, "command",
+     "US Central Command + US Special Operations Command HQ (Tampa, FL)"),
+    ("Scott AFB", -89.835, 38.545, "command",
+     "US Transportation Command + Air Mobility Command HQ (IL)"),
+    ("Fort Eisenhower (Fort Gordon)", -82.150, 33.420, "command",
+     "US Army Cyber Command; NSA Georgia (Augusta, GA)"),
+    # Army posts (large; mostly new coverage)
+    ("Fort Stewart", -81.609, 31.869, "army_base",
+     "3rd Infantry Division (Hinesville, GA)"),
+    ("Fort Drum", -75.766, 44.051, "army_base",
+     "10th Mountain Division (Watertown, NY)"),
+    ("Fort Riley", -96.809, 39.083, "army_base",
+     "1st Infantry Division (Junction City, KS)"),
+    ("Fort Sill", -98.402, 34.661, "army_base",
+     "Field Artillery & air-defense center (Lawton, OK)"),
+    ("Fort Leonard Wood", -92.132, 37.748, "army_base",
+     "Army engineer/MP/chemical training center (MO)"),
+    ("Fort Jackson", -80.850, 34.040, "army_base",
+     "largest Army basic-training center (Columbia, SC)"),
+    ("Fort Johnson (Fort Polk)", -93.180, 31.050, "army_base",
+     "Joint Readiness Training Center (Leesville, LA)"),
+    # Air Force (large; new coverage)
+    ("Eglin AFB", -86.550, 30.460, "air_base",
+     "armament development & test; large training range (FL panhandle)"),
+    ("Davis-Monthan AFB", -110.883, 32.166, "air_base",
+     "A-10s; aircraft boneyard (AMARG) (Tucson, AZ)"),
+    ("Joint Base San Antonio", -98.620, 29.380, "air_base",
+     "largest joint base by population; basic military training; Army medical (TX)"),
 ]
 
 
