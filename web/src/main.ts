@@ -19,7 +19,13 @@ import {
   type GeoJsonFeatureCollection,
   type TargetDeckMeta,
 } from "./api";
-import { fetchLevelSet, levelsForTime, TIME_MIN_HOURS, TIME_MAX_HOURS } from "./decay";
+import {
+  DISPLAY_LEVELS_RHR,
+  fetchLevelSet,
+  levelsForTime,
+  TIME_MIN_HOURS,
+  TIME_MAX_HOURS,
+} from "./decay";
 
 // Free, keyless vector basemap (openfreemap.org) -- no API key/signup needed,
 // which matters for a project meant to run out of the box.
@@ -264,13 +270,26 @@ map.getCanvas().addEventListener("webglcontextlost", () => {
   statusEl.classList.add("error");
 });
 
-// Our overlay is "ready" once the STYLE is loaded and our sources/layers are
-// installed. We deliberately do NOT gate on the `load` event: `load` also waits
-// for the initial basemap TILES, so a slow or blocked external tile host delays
-// it for many seconds and makes compute spuriously fail with "map tiles never
-// finished loading" even though the overlay could render fine. Adding sources/
-// layers only needs the style, so we do it on `styledata` as soon as the style
-// is ready -- contours render regardless of basemap tile availability.
+// Our overlay is "ready" once the style has been PARSED and our sources/layers
+// are installed. We deliberately do NOT gate on the `load` event: `load` also
+// waits for the initial basemap TILES, so a slow or blocked external tile host
+// delays it for many seconds and makes compute spuriously fail even though the
+// overlay could render fine.
+//
+// `map.isStyleLoaded()` is NOT that gate either, despite the name: MapLibre's
+// Style.loaded() returns false unless every source cache is loaded AND the
+// sprite images are loaded -- i.e. it carries the exact basemap-tile dependency
+// we are trying to avoid. Verified live against openfreemap: style._loaded was
+// true and the basemap was visibly drawn while isStyleLoaded() stayed false
+// indefinitely (sourceCaches ne2_shaded/openmaptiles both reporting unloaded),
+// so setup never ran and every compute died after the 20 s timeout with
+// "Map style failed to load. Check your connection and reload."
+//
+// What addSource/addLayer actually require is a parsed style, and they throw a
+// plain Error until then. So: attempt the install, treat a throw as "not parsed
+// yet" and retry on the next styledata. Each step is individually guarded by a
+// getSource/getLayer check so a partial install (parse completes mid-sequence,
+// or a retry after a throw) can never double-add and wedge setup permanently.
 let mapSetupDone = false;
 let resolveMapReady!: () => void;
 const mapReady = new Promise<void>((resolve) => {
@@ -278,43 +297,57 @@ const mapReady = new Promise<void>((resolve) => {
 });
 
 function setupMapOverlay(): void {
-  if (mapSetupDone || !map.isStyleLoaded()) return;
+  if (mapSetupDone) return;
 
-  map.addSource(FIELD_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
-  map.addSource(TARGET_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
-  map.addSource(CONTOUR_SOURCE, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+  try {
+    for (const id of [FIELD_SOURCE, TARGET_SOURCE, CONTOUR_SOURCE]) {
+      if (!map.getSource(id)) {
+        map.addSource(id, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
+      }
+    }
 
-  // Documented field FOOTPRINTS (the verifiable geography). Dashed outline
-  // underneath the synthetic points, so it's clear the field extent is real
-  // even though the individual dots inside it are not.
-  map.addLayer({
-    id: FIELD_LAYER,
-    type: "line",
-    source: FIELD_SOURCE,
-    paint: { "line-color": "rgba(120,120,130,0.9)", "line-width": 1.5, "line-dasharray": [3, 2] },
-  });
+    // Documented field FOOTPRINTS (the verifiable geography). Dashed outline
+    // underneath the synthetic points, so it's clear the field extent is real
+    // even though the individual dots inside it are not.
+    if (!map.getLayer(FIELD_LAYER)) {
+      map.addLayer({
+        id: FIELD_LAYER,
+        type: "line",
+        source: FIELD_SOURCE,
+        paint: { "line-color": "rgba(120,120,130,0.9)", "line-width": 1.5, "line-dasharray": [3, 2] },
+      });
+    }
 
-  // Target dots below the contour lines. Small in pixels so a dense missile
-  // field reads as a cluster of points, not a blob. Colored by category.
-  map.addLayer({
-    id: TARGET_LAYER,
-    type: "circle",
-    source: TARGET_SOURCE,
-    paint: {
-      "circle-radius": ["match", ["get", "category"], "icbm_lf", 2.5, 4],
-      "circle-color": categoryColorExpr() as maplibregl.ExpressionSpecification,
-      "circle-stroke-width": 0.5,
-      "circle-stroke-color": "rgba(255,255,255,0.7)",
-    },
-  });
+    // Target dots below the contour lines. Small in pixels so a dense missile
+    // field reads as a cluster of points, not a blob. Colored by category.
+    if (!map.getLayer(TARGET_LAYER)) {
+      map.addLayer({
+        id: TARGET_LAYER,
+        type: "circle",
+        source: TARGET_SOURCE,
+        paint: {
+          "circle-radius": ["match", ["get", "category"], "icbm_lf", 2.5, 4],
+          "circle-color": categoryColorExpr() as maplibregl.ExpressionSpecification,
+          "circle-stroke-width": 0.5,
+          "circle-stroke-color": "rgba(255,255,255,0.7)",
+        },
+      });
+    }
 
-  map.addLayer({
-    id: CONTOUR_LAYER,
-    type: "line",
-    source: CONTOUR_SOURCE,
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-width": 3, "line-color": "rgba(255,255,255,0.8)" },
-  });
+    if (!map.getLayer(CONTOUR_LAYER)) {
+      map.addLayer({
+        id: CONTOUR_LAYER,
+        type: "line",
+        source: CONTOUR_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-width": 3, "line-color": "rgba(255,255,255,0.8)" },
+      });
+    }
+  } catch {
+    // Style not parsed yet -- a later `styledata` (or the ensureMapReady poll)
+    // retries. Partial progress is safe: every step above is idempotent.
+    return;
+  }
 
   installHoverPopups();
   mapSetupDone = true;
@@ -1466,7 +1499,25 @@ function renderAtCurrentTime(): void {
 
   setContours(displayed, colorMatchExpr("display_level_rhr", LEVEL_COLORS), 3);
 
-  renderLegend(picks.map((p) => p.displayLevel));
+  // Legend keys the bands actually DRAWN, not the four we asked for. A band
+  // whose level exceeds this plume's peak dose has no contour (levelsForTime
+  // omits it), and listing it anyway told the user there was a 1000 R/hr zone
+  // on a map that never drew one.
+  const shownLevels = [...new Set(features.map((f) => f.properties.display_level_rhr))].sort(
+    (a, b) => a - b,
+  );
+  renderLegend(shownLevels);
+  // Late in the decay the whole footprint drops below the lowest plotted band
+  // and the map legitimately goes empty. Say that, rather than leaving a blank
+  // map, an empty legend and an empty table with no explanation.
+  if (shownLevels.length === 0) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent =
+      `Nothing to draw at ${timeLabel.textContent}: decay has taken the entire ` +
+      `footprint below ${DISPLAY_LEVELS_RHR[0]} R/hr, the lowest plotted band.`;
+    legendEl.appendChild(p);
+  }
 
   const gz = currentPlume.ground_zero;
   const rows: ContourRow[] = [];
@@ -1732,6 +1783,15 @@ async function inspectExposure(lat: number, lon: number): Promise<void> {
   exposureSummaryEl.textContent = "Assessing…";
   exposureDosesEl.textContent = "";
   exposureNotesEl.textContent = "";
+  // The panel sits far down a scrolling sidebar (measured ~1370 px into a
+  // ~680 px viewport once a result is on screen), so without this the click
+  // that opened it produces no visible change at all and the whole
+  // click-to-inspect feature reads as broken.
+  // Instant, not smooth: the animated scroll does not survive renderExposure()
+  // rewriting the panel's contents underneath it a moment later (verified live
+  // -- the panel stayed at scrollTop 0), and an instant jump is the right
+  // feedback for a click anyway.
+  exposureSection.scrollIntoView({ block: "nearest" });
 
   try {
     const resp = await fetchExposure({
