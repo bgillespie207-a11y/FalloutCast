@@ -254,6 +254,25 @@ button {
   font-size: 0.9rem;
 }
 
+/* Visible keyboard focus. The UA default ring is a thin 1px auto outline that
+   nearly vanishes against the dark-green buttons, so state it explicitly. The
+   2px offset puts the ring on the light panel background, where the blue has
+   good contrast against both the panel and the button. */
+:focus-visible {
+  outline: 3px solid #0b57d0;
+  outline-offset: 2px;
+}
+/* These two groups clip their children (overflow: hidden gives them rounded
+   ends), which would slice an offset ring in half -- draw it inside instead. */
+.mode-tabs [role="tab"]:focus-visible,
+.units-seg button:focus-visible {
+  outline-offset: -3px;
+}
+/* Blue on the dark red disclaimer bar has too little contrast. */
+#disclaimer-toggle:focus-visible {
+  outline-color: #fff;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: default;

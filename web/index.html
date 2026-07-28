@@ -36,11 +36,30 @@
         <!-- Mode is a major state change (different inputs, different compute,
         different map layers), so it's a top-level tab pair, not a checkbox
         buried among the form fields (the UX review's finding). -->
+        <!-- Roving tabindex (tabindex is managed in JS): Tab moves into the
+        tablist once, then Left/Right move between the tabs. Both tabs point at
+        the one #mode-panel below, whose contents swap with the mode -- role=tab
+        without a controlled tabpanel is broken semantics, since a screen reader
+        announces a tab-to-panel relationship that does not exist. -->
         <div class="mode-tabs" role="tablist" aria-label="Computation mode">
-          <button type="button" role="tab" id="tab-single" aria-selected="true">
+          <button
+            type="button"
+            role="tab"
+            id="tab-single"
+            aria-selected="true"
+            aria-controls="mode-panel"
+            tabindex="0"
+          >
             Single location
           </button>
-          <button type="button" role="tab" id="tab-exchange" aria-selected="false">
+          <button
+            type="button"
+            role="tab"
+            id="tab-exchange"
+            aria-selected="false"
+            aria-controls="mode-panel"
+            tabindex="-1"
+          >
             National envelope
           </button>
         </div>
@@ -50,13 +69,23 @@
         approximate Sv dose reference. -->
         <div class="units-row" role="radiogroup" aria-label="Display units">
           <span class="units-label">Units</span>
+          <!-- Roving tabindex again (managed in JS): a radiogroup is one tab
+          stop, with Left/Right choosing within it. -->
           <div class="units-seg">
-            <button type="button" id="units-metric" role="radio" aria-checked="true">Metric</button>
-            <button type="button" id="units-us" role="radio" aria-checked="false">US</button>
+            <button type="button" id="units-metric" role="radio" aria-checked="true" tabindex="0">
+              Metric
+            </button>
+            <button type="button" id="units-us" role="radio" aria-checked="false" tabindex="-1">
+              US
+            </button>
           </div>
         </div>
 
         <form id="plume-form">
+          <!-- The single tabpanel both mode tabs control. Its contents are
+          swapped rather than replaced wholesale (the fields overlap between
+          modes), so aria-labelledby is repointed at the active tab in JS. -->
+          <div id="mode-panel" role="tabpanel" aria-labelledby="tab-single">
           <div id="single-target-fields">
             <!-- step="any" throughout: a fixed decimal step (e.g. 0.01) makes
             the browser's native step-mismatch validation reject values like
@@ -241,6 +270,8 @@
             bounding case). Curated, incomplete target deck; silo positions are
             synthetic. See the notes after computing.
           </p>
+          </div>
+          <!-- /#mode-panel -->
           <button type="submit" id="compute-btn">Compute plume</button>
           <!-- Shown when an input has changed since the displayed result was
           computed. A notice rather than clearing the map: clearing on every

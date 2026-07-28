@@ -155,6 +155,7 @@ const locSearchInput = document.getElementById("loc-search") as HTMLInputElement
 const locSearchBtn = document.getElementById("loc-search-btn") as HTMLButtonElement;
 const tabSingle = document.getElementById("tab-single") as HTMLButtonElement;
 const tabExchange = document.getElementById("tab-exchange") as HTMLButtonElement;
+const modePanel = document.getElementById("mode-panel") as HTMLElement;
 const singleTargetFields = document.getElementById("single-target-fields") as HTMLElement;
 const globalYieldFields = document.getElementById("global-yield-fields") as HTMLElement;
 const perClassNote = document.getElementById("per-class-note") as HTMLElement;
@@ -630,6 +631,13 @@ function setMode(exchange: boolean): void {
   newComputeToken(); // invalidate any in-flight compute for the previous mode
   tabSingle.setAttribute("aria-selected", String(!exchange));
   tabExchange.setAttribute("aria-selected", String(exchange));
+  // Roving tabindex: exactly one tab is in the page's tab order, so Tab enters
+  // the tablist once and the arrow keys choose within it.
+  tabSingle.tabIndex = exchange ? -1 : 0;
+  tabExchange.tabIndex = exchange ? 0 : -1;
+  // Both tabs control the one panel, so its accessible name follows the
+  // selection rather than being fixed to whichever tab is written first.
+  modePanel.setAttribute("aria-labelledby", exchange ? "tab-exchange" : "tab-single");
   singleTargetFields.hidden = exchange;
   // Global yield/fission drive only the single-plume view; the envelope uses
   // per-target-class yields server-side, so swap the input for a summary note.
@@ -643,9 +651,18 @@ function setMode(exchange: boolean): void {
 
 tabSingle.addEventListener("click", () => setMode(false));
 tabExchange.addEventListener("click", () => setMode(true));
-// Standard tablist keyboard pattern: arrow keys move between the two tabs.
+// Standard tablist keyboard pattern: arrow keys move between the two tabs,
+// Home/End jump to the first/last (with two tabs those coincide with the
+// arrows, but the pattern is what screen-reader users will try).
 for (const tab of [tabSingle, tabExchange]) {
   tab.addEventListener("keydown", (e) => {
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const target = e.key === "Home" ? tabSingle : tabExchange;
+      target.focus();
+      target.click();
+      return;
+    }
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
       const other = tab === tabSingle ? tabExchange : tabSingle;
@@ -694,18 +711,36 @@ function svApprox(r: number): string {
   return mSv >= 1000 ? `${(mSv / 1000).toFixed(mSv >= 10000 ? 0 : 1)} Sv` : `${mSv.toFixed(mSv >= 10 ? 0 : 1)} mSv`;
 }
 
+// Checked state + roving tabindex for the two radio buttons. A radiogroup is a
+// single tab stop: only the checked option is tabbable, and the arrow keys move
+// (and select) within the group.
+function syncUnitButtons(): void {
+  unitsMetricBtn.setAttribute("aria-checked", String(unitSystem === "metric"));
+  unitsUsBtn.setAttribute("aria-checked", String(unitSystem === "us"));
+  unitsMetricBtn.tabIndex = unitSystem === "metric" ? 0 : -1;
+  unitsUsBtn.tabIndex = unitSystem === "us" ? 0 : -1;
+}
+
 function setUnitSystem(sys: UnitSystem): void {
   unitSystem = sys;
   localStorage.setItem(UNITS_KEY, sys);
-  unitsMetricBtn.setAttribute("aria-checked", String(sys === "metric"));
-  unitsUsBtn.setAttribute("aria-checked", String(sys === "us"));
+  syncUnitButtons();
   applyUnits();
 }
 unitsMetricBtn.addEventListener("click", () => setUnitSystem("metric"));
 unitsUsBtn.addEventListener("click", () => setUnitSystem("us"));
+for (const btn of [unitsMetricBtn, unitsUsBtn]) {
+  btn.addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const next =
+      e.key === "Home" ? "metric" : e.key === "End" ? "us" : unitSystem === "metric" ? "us" : "metric";
+    setUnitSystem(next as UnitSystem);
+    (next === "metric" ? unitsMetricBtn : unitsUsBtn).focus();
+  });
+}
 // Reflect the persisted choice on load (no re-render needed before any result).
-unitsMetricBtn.setAttribute("aria-checked", String(unitSystem === "metric"));
-unitsUsBtn.setAttribute("aria-checked", String(unitSystem === "us"));
+syncUnitButtons();
 
 // Re-render whatever unit-bearing result is on screen, in place (no recompute).
 function applyUnits(): void {
