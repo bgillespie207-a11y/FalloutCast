@@ -1308,29 +1308,31 @@ function renderWindProfile(points: WindProfilePoint[]): void {
   if (layerRows > 0) {
     const bandY = padY + (rows.length - layerRows) * rowH;
     parts.push(
-      `<rect x="0" y="${bandY}" width="${W}" height="${layerRows * rowH}" rx="4" fill="rgba(26,77,46,0.07)"/>`,
+      `<rect x="0" y="${bandY}" width="${W}" height="${layerRows * rowH}" rx="4" class="wp-band"/>`,
     );
   }
 
   rows.forEach((p, i) => {
     const cy = padY + i * rowH + rowH / 2;
-    const bold = p.in_fallout_layer;
-    const color = bold ? "#1a4d2e" : "#8a94a0";
+    // Class, not an inline fill/stroke, so the arrows and labels follow the
+    // light/dark palette (see .wp-bold / .wp-faint in style.css). stroke and
+    // fill both inherit, so the <line> and <path> inside the group pick it up.
+    const cls = p.in_fallout_layer ? "wp-bold" : "wp-faint";
     const half = 4 + (p.speed_mph / maxSpeed) * 16;
     const tipY = cy - half;
     // Up-pointing arrow rotated clockwise by the compass "toward" bearing
     // (0 = north = up), so the column reads in real map orientation.
     parts.push(
-      `<g transform="rotate(${p.toward_deg.toFixed(1)} ${cx} ${cy})" stroke="${color}" fill="${color}">` +
+      `<g transform="rotate(${p.toward_deg.toFixed(1)} ${cx} ${cy})" class="${cls}">` +
         `<line x1="${cx}" y1="${cy + half}" x2="${cx}" y2="${tipY}" stroke-width="2"/>` +
         `<path d="M${cx} ${tipY} L${cx - 3.5} ${tipY + 6} L${cx + 3.5} ${tipY + 6} Z" stroke="none"/>` +
         `</g>`,
     );
     parts.push(
-      `<text x="6" y="${cy}" font-size="11" fill="${color}" dominant-baseline="middle">${formatHeightShort(p)}</text>`,
+      `<text x="6" y="${cy}" font-size="11" class="${cls}" stroke="none" dominant-baseline="middle">${formatHeightShort(p)}</text>`,
     );
     parts.push(
-      `<text x="${W - 6}" y="${cy}" font-size="11" fill="${color}" text-anchor="end" dominant-baseline="middle">${formatSpeedShort(p.speed_mph)}</text>`,
+      `<text x="${W - 6}" y="${cy}" font-size="11" class="${cls}" stroke="none" text-anchor="end" dominant-baseline="middle">${formatSpeedShort(p.speed_mph)}</text>`,
     );
   });
 
