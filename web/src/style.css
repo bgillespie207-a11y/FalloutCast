@@ -654,11 +654,51 @@ button:disabled {
     border-right: none;
     border-top: 1px solid #ddd;
   }
-  /* Keep the primary action reachable while the controls scroll. */
+  /* Keep the primary action reachable while the controls scroll. A sticky bar
+     necessarily sits over whatever is at the bottom of the scrollport, so make
+     it read as a deliberate action bar rather than a button colliding with the
+     form: full-bleed to the panel edges, with an opaque strip of panel
+     background above it separating it from the content sliding underneath. */
   #compute-btn {
     position: sticky;
-    bottom: 0;
+    /* -1rem, not 0: sticky bottom is measured from the scrollport's padding
+       edge, and #panel has 1rem of it, which otherwise leaves a strip of form
+       showing through beneath the bar. */
+    bottom: -1rem;
     z-index: 5;
-    box-shadow: 0 -3px 8px rgba(0, 0, 0, 0.18);
+    min-height: 52px;
+    margin-left: -1rem;
+    margin-right: -1rem;
+    width: calc(100% + 2rem);
+    border-radius: 0;
+    box-shadow:
+      0 -0.6rem 0 #f7f5f2,
+      0 -0.75rem 10px rgba(0, 0, 0, 0.16);
+  }
+  /* The sticky button sits over whatever form field happens to be at the
+     bottom of the scrollport. That is fine while scrolling past, but the
+     browser's own "scroll the focused field into view" would otherwise park a
+     field directly underneath it -- you tap an input and it lands behind the
+     button. Reserve the button's height as scroll margin so focus always
+     stops clear of it. */
+  #plume-form input,
+  #plume-form select,
+  #plume-form summary {
+    scroll-margin-bottom: 4rem;
+  }
+  /* Blank space at the end of the form so the last control can scroll above
+     the sticky button rather than resting permanently behind it. */
+  #plume-form {
+    padding-bottom: 1rem;
+  }
+
+  /* MapLibre puts the scale bars bottom-left and the attribution bottom-right,
+     sharing one vertical band (measured at 375px: attribution y 442-486, scale
+     bars y 422-476). Once the compact attribution is expanded it is wide enough
+     to cover the lower scale bar entirely. Lift the scale bars clear of it.
+     Sized for the worst case -- the expanded attribution wraps to two lines and
+     measures 64px, so 4.5rem clears it with a small gap. */
+  .maplibregl-ctrl-bottom-left {
+    bottom: 4.5rem;
   }
 }
