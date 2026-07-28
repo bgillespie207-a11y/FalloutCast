@@ -589,6 +589,18 @@ button:disabled {
   flex: 1;
 }
 
+/* "Inputs changed since this result" notice under the compute button. */
+#stale-note {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #4a2c00;
+  background: #fff4e0;
+  border: 1px solid #e0b060;
+  border-radius: 4px;
+}
+
 /* Synthetic-geography badge for the exchange view (honest provenance). */
 .geo-badge {
   margin-top: 0.6rem;

@@ -242,6 +242,13 @@
             synthetic. See the notes after computing.
           </p>
           <button type="submit" id="compute-btn">Compute plume</button>
+          <!-- Shown when an input has changed since the displayed result was
+          computed. A notice rather than clearing the map: clearing on every
+          keystroke blanks the result while you are still typing a yield. -->
+          <p id="stale-note" hidden>
+            Inputs have changed since this result was computed — Compute again
+            to update it.
+          </p>
         </form>
 
         <!-- Live region: progress is announced politely; failures are switched

@@ -170,6 +170,7 @@ const ensembleFields = document.getElementById("ensemble-fields") as HTMLElement
 const ensembleLevelInput = document.getElementById("ensemble-level") as HTMLInputElement;
 const ensembleMembersInput = document.getElementById("ensemble-members") as HTMLInputElement;
 const computeBtn = document.getElementById("compute-btn") as HTMLButtonElement;
+const staleNoteEl = document.getElementById("stale-note") as HTMLParagraphElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 const timeControl = document.getElementById("time-control") as HTMLElement;
 const timeSlider = document.getElementById("time-slider") as HTMLInputElement;
@@ -480,6 +481,43 @@ function clearResults(): void {
   reportBtn.hidden = true;
   shareBtn.hidden = true;
   overviewBtn.hidden = true;
+  clearStaleNote();
+}
+
+// --- stale-result notice -------------------------------------------------------
+// Editing an input does NOT re-run the model, so the plume on screen can end up
+// labelled with controls that no longer produced it -- a 5 Mt footprint sitting
+// next to a yield box reading 0.3. We flag that rather than clearing the map:
+// clearing on every keystroke blanks the result mid-way through typing "0.35".
+// Cleared again by any successful compute (the inputs then match the result).
+
+function clearStaleNote(): void {
+  staleNoteEl.hidden = true;
+}
+
+function markResultsStale(): void {
+  // The envelope is driven entirely by server-side per-class yields, so none of
+  // these controls apply to it.
+  if (exchangeMode) return;
+  if (!currentPlume && !exportGeoJson) return; // nothing on screen to invalidate
+  staleNoteEl.hidden = false;
+}
+
+for (const el of [
+  latInput,
+  lonInput,
+  yieldInput,
+  ffInput,
+  windSpeedInput,
+  windBearingInput,
+  windShearInput,
+  ensembleLevelInput,
+  ensembleMembersInput,
+]) {
+  el.addEventListener("input", markResultsStale);
+}
+for (const el of [manualWindCheckbox, ...form.querySelectorAll<HTMLInputElement>('input[name="tier"]')]) {
+  el.addEventListener("change", markResultsStale);
 }
 
 ensembleModeCheckbox.addEventListener("change", () => {
@@ -674,6 +712,13 @@ function applyUnits(): void {
   if (lastContourTable) renderContourTable(lastContourTable.caption, lastContourTable.rows);
   if (lastWindProfilePoints) renderWindProfile(lastWindProfilePoints);
   if (lastExposureResp && !exposureSection.hidden) renderExposure(lastExposureResp);
+  // The status line quotes the effective wind, whose PRIMARY unit follows this
+  // preference -- without this it kept saying "16 mph (25 km/h)" after a switch
+  // to metric, until the next compute. Skipped while an error is showing so a
+  // failure message isn't overwritten by a stale success summary.
+  if (currentPlume && !statusEl.classList.contains("error")) {
+    statusEl.textContent = plumeStatusText(currentPlume);
+  }
 }
 
 async function computePlume(): Promise<void> {
@@ -827,6 +872,7 @@ async function computeEnsembleBand(): Promise<void> {
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
     writeUrlState({ mode: "ensemble" });
+    clearStaleNote(); // inputs now match the result on screen
     setDisclaimer(resp.disclaimer);
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
 
@@ -902,6 +948,7 @@ async function computeSinglePlume(): Promise<void> {
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
     writeUrlState({ mode: "plume", tier });
+    clearStaleNote(); // inputs now match the result on screen
     currentPlume = resp;
     setDisclaimer(resp.disclaimer);
     placeGzMarker(resp.ground_zero[1], resp.ground_zero[0]);
@@ -926,20 +973,13 @@ async function computeSinglePlume(): Promise<void> {
       };
     }
 
-    const inspectHint = inspectContext ? " Click the map to assess a point." : "";
-    statusEl.textContent = `${TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`} used. Wind: ${describeWind(resp)}.${inspectHint}`;
+    statusEl.textContent = plumeStatusText(resp);
     renderWeather(resp.weather);
     renderNotes(resp);
     if (resp.wind_profile && resp.wind_profile.length > 0) {
       renderWindProfile(resp.wind_profile);
     } else {
       clearWindProfile();
-    }
-    const plumeNotes = [...resp.notes];
-    if (resp.fraction_aloft != null && resp.fraction_aloft > 0.01) {
-      plumeNotes.push(
-        `${(resp.fraction_aloft * 100).toFixed(0)}% of activity carried past the local footprint (regional/global).`,
-      );
     }
     exportReport = {
       mode: "plume",
@@ -955,7 +995,7 @@ async function computeSinglePlume(): Promise<void> {
       ],
       // reach + displayTime are filled by renderAtCurrentTime (they depend on
       // the decay slider), which runs immediately below.
-      notes: plumeNotes,
+      notes: plumeNotesFor(resp),
       disclaimer: resp.disclaimer,
     };
     timeControl.hidden = false;
@@ -1003,6 +1043,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
     map.flyTo({ center: OVERVIEW, zoom: OVERVIEW_ZOOM });
 
     writeUrlState({ mode: "exchange" });
+    clearStaleNote(); // inputs now match the result on screen
     statusEl.textContent =
       `Max-single-source envelope across ${resp.n_targets} target(s).`;
     renderWeather(resp.weather); // valid hour + staleness live here now
@@ -1150,15 +1191,34 @@ function describeWind(resp: PlumeResponse): string {
   return `${formatSpeed(w.speed_mph)} @ ${w.bearing_deg?.toFixed(0)}° (${w.source})`;
 }
 
-function renderNotes(resp: PlumeResponse): void {
-  notesEl.innerHTML = "";
-  const allNotes = [...resp.notes];
-  if (resp.fraction_aloft != null && resp.fraction_aloft > 0.01) {
-    allNotes.push(
+/** The single-plume status line. Built from the response (not captured as a
+ * string at compute time) so applyUnits can rebuild it when the unit
+ * preference changes -- describeWind's primary unit is unit-dependent. */
+function plumeStatusText(resp: PlumeResponse): string {
+  const inspectHint = inspectContext ? " Click the map to assess a point." : "";
+  const tier = TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`;
+  return `${tier} used. Wind: ${describeWind(resp)}.${inspectHint}`;
+}
+
+/** The API's notes plus, when it's worth saying and the API hasn't already
+ * said it, how much activity left the local footprint. The API adds its own
+ * (wordier) version above 0.05 while we surface anything above 0.01, so
+ * without the substring check both land in the panel and in the exported
+ * report saying the same thing twice. */
+function plumeNotesFor(resp: PlumeResponse): string[] {
+  const notes = [...resp.notes];
+  const apiSaidIt = notes.some((n) => n.includes("still airborne"));
+  if (!apiSaidIt && resp.fraction_aloft != null && resp.fraction_aloft > 0.01) {
+    notes.push(
       `${(resp.fraction_aloft * 100).toFixed(0)}% of activity carried past the local footprint (regional/global).`,
     );
   }
-  for (const note of allNotes) {
+  return notes;
+}
+
+function renderNotes(resp: PlumeResponse): void {
+  notesEl.innerHTML = "";
+  for (const note of plumeNotesFor(resp)) {
     const p = document.createElement("p");
     p.textContent = note;
     notesEl.appendChild(p);
