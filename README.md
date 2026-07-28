@@ -50,10 +50,12 @@ wind shear through the fall curves and fans the footprint the way Tier-0 cannot.
 - [x] Exchange mode: true national max-envelope dose surface
       (`POST /exchange/envelope`) — one composite CONUS grid, cell-wise max
       across all targets; no result caching yet (recomputes live every call)
-- [x] Web map frontend (`web/`, MapLibre + deck.gl) — single-plume view only
-      (Tier 0/1 toggle, click-to-set-GZ, decay time slider computed
-      client-side with zero extra API calls, GeoJSON export). Exchange
-      overlay/envelope and ensemble bands have no frontend yet.
+- [x] Web map frontend (`web/`, native MapLibre layers) — all three views:
+      single plume (Tier 0/1 toggle, click-to-set-GZ, click-to-inspect point
+      exposure), national envelope, and ensemble uncertainty bands. Decay-time
+      slider computed client-side with zero extra API calls, on both the plume
+      (to H+7d) and the envelope (to H+24). GeoJSON + Markdown report export,
+      shareable scenario URLs, light/dark themes.
 
 ## Quickstart
 
@@ -96,6 +98,15 @@ instead):
 curl -s -X POST 'localhost:8000/exchange/envelope?yield_mt=0.3&fission_fraction=0.5'
 ```
 
+Optionally pass an explicit set of H+1 contour levels instead of the four
+standard bands (this is what lets the web UI's decay slider relabel the
+envelope without recomputing — see below):
+
+```bash
+curl -s -X POST localhost:8000/exchange/envelope \
+  -H 'content-type: application/json' -d '{"levels_rhr": [1, 3, 10, 30, 100]}'
+```
+
 ## Web frontend
 
 ```bash
@@ -109,8 +120,15 @@ pick yield/fission-fraction/tier, hit Compute. The decay-time slider doesn't
 re-hit the API as you drag it — Way-Wigner decay (dose rate ∝ t^-1.2) is
 separable, so the contour for level *L* at time *t* is exactly the H+1
 contour for level *L·t^1.2*; the app fetches one dense set of H+1 levels
-once and relabels/reselects client-side (`web/src/decay.ts`). No exchange
-overlay/envelope or ensemble-band view yet — single detonations only.
+once and relabels/reselects client-side (`web/src/decay.ts`).
+
+The **national envelope** view uses the same slider (H+1 to H+24). The
+shortcut stays exact there because both aggregations are positively
+homogeneous — `max(a·k, b·k) = k·max(a, b)`, `a·k + b·k = k·(a + b)` — so
+scaling every cell by one decay factor commutes with combining targets
+(pinned by `test_decay_commutes_with_envelope_aggregation`). Two caveats the
+UI states on screen: it models decay only, not fallout **arrival** time at a
+location, and it assumes every target is struck at the same moment.
 
 Basemap is [OpenFreeMap](https://openfreemap.org) (free, keyless, no signup
 needed). CORS is wide open on the API (`allow_origins=["*"]`) since every

@@ -307,20 +307,18 @@
             list="time-ticks"
             aria-describedby="time-ticks-labels"
           />
-          <datalist id="time-ticks">
-            <option value="0"></option>
-            <option value="70"></option>
-            <option value="124"></option>
-            <option value="151"></option>
-            <option value="200"></option>
-          </datalist>
-          <div id="time-ticks-labels" class="tick-labels" aria-hidden="true">
-            <span style="left: 0%">H+1</span>
-            <span style="left: 35%">H+6</span>
-            <span style="left: 62%">H+24</span>
-            <span style="left: 75%">H+48</span>
-            <span style="left: 100%">H+7d</span>
-          </div>
+          <!-- Ticks and their labels are generated in JS (renderTimeTicks): the
+          slider's upper bound differs by mode -- H+7d for a single plume, H+24
+          for the national envelope -- so their log-scale positions cannot be
+          hardcoded. -->
+          <datalist id="time-ticks"></datalist>
+          <div id="time-ticks-labels" class="tick-labels" aria-hidden="true"></div>
+          <p id="time-caveat" class="hint" hidden>
+            Decay only: every point is scaled by the same Way-Wigner
+            t<sup>−1.2</sup> factor from its H+1 reference. This does not model
+            <em>when</em> fallout actually arrives at a location, and it assumes
+            every target is struck at the same moment.
+          </p>
         </section>
         <!-- Outside #time-control: the exchange-envelope view has a legend
         (fixed H+1 levels) but no decay-time slider, so the two can't share

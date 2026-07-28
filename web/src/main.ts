@@ -21,6 +21,7 @@ import {
 } from "./api";
 import {
   DISPLAY_LEVELS_RHR,
+  ENVELOPE_TIME_MAX_HOURS,
   fetchLevelSet,
   levelsForTime,
   TIME_MIN_HOURS,
@@ -176,6 +177,9 @@ const statusEl = document.getElementById("status") as HTMLDivElement;
 const timeControl = document.getElementById("time-control") as HTMLElement;
 const timeSlider = document.getElementById("time-slider") as HTMLInputElement;
 const timeLabel = document.getElementById("time-label") as HTMLSpanElement;
+const timeTicks = document.getElementById("time-ticks") as HTMLDataListElement;
+const timeTickLabels = document.getElementById("time-ticks-labels") as HTMLDivElement;
+const timeCaveat = document.getElementById("time-caveat") as HTMLParagraphElement;
 const legendEl = document.getElementById("legend") as HTMLDivElement;
 const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const reportBtn = document.getElementById("report-btn") as HTMLButtonElement;
@@ -477,7 +481,9 @@ function clearResults(): void {
   clearContourTable();
   renderWeather(null);
   clearWindProfile();
+  decaySeries = null;
   timeControl.hidden = true;
+  timeCaveat.hidden = true;
   exportBtn.hidden = true;
   reportBtn.hidden = true;
   shareBtn.hidden = true;
@@ -1033,13 +1039,15 @@ async function computeSinglePlume(): Promise<void> {
       notes: plumeNotesFor(resp),
       disclaimer: resp.disclaimer,
     };
-    timeControl.hidden = false;
     exportBtn.hidden = false;
     reportBtn.hidden = false;
     shareBtn.hidden = false;
     overviewBtn.hidden = false;
-    timeSlider.value = "0";
-    renderAtCurrentTime();
+    startDecaySeries({
+      contours: resp.contours,
+      gz: resp.ground_zero,
+      maxHours: TIME_MAX_HOURS,
+    });
     fitToFeatures(resp.contours, [resp.ground_zero[0], resp.ground_zero[1]]);
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
@@ -1056,7 +1064,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
   computeBtn.disabled = true;
   statusEl.classList.remove("error");
   statusEl.classList.add("busy");
-  timeControl.hidden = true; // envelope has no dense level set -- no decay slider
+  timeControl.hidden = true;
   exportBtn.hidden = true;
   reportBtn.hidden = true;
   shareBtn.hidden = true;
@@ -1069,7 +1077,15 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
     // ~500 live wind buckets + grid compositing: seconds, not instant. Keep an
     // elapsed ticker running so it never looks hung (the reviewer's finding).
     startElapsed("Computing national envelope (live wind for the whole deck)");
-    const resp = await withTimeout(fetchExchangeEnvelope("max_single_source", forceRefresh));
+    const resp = await withTimeout(
+      // Dense H+1 level set (not the four defaults) so the decay slider can
+      // relabel the envelope client-side, exactly as it does for a plume.
+      fetchExchangeEnvelope(
+        "max_single_source",
+        forceRefresh,
+        fetchLevelSet(ENVELOPE_TIME_MAX_HOURS),
+      ),
+    );
     if (isStale(token)) return; // mode changed mid-compute; discard
     stopElapsed();
     setDisclaimer(resp.disclaimer);
@@ -1083,12 +1099,9 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
       `Max-single-source envelope across ${resp.n_targets} target(s).`;
     renderWeather(resp.weather); // valid hour + staleness live here now
     renderPlainNotes(resp.notes);
-    renderStaticContours(resp.contours);
-    renderSyntheticBadge();
-    // Carry the full provenance (weather, aggregation, yield policy, deck
-    // version/hash, in/excluded targets) into the export -- not just contours.
-    exportGeoJson = {
-      ...resp.contours,
+    // Full provenance (weather, aggregation, yield policy, deck version/hash,
+    // in/excluded targets) rides along with whichever time slice is exported.
+    const provenance = {
       weather: resp.weather ?? undefined,
       aggregation: resp.aggregation,
       deck_version: resp.deck_version,
@@ -1096,7 +1109,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
       yield_policy: resp.yield_policy,
       included_target_ids: resp.included_target_ids,
       excluded_target_ids: resp.excluded_target_ids,
-    } as GeoJsonFeatureCollection;
+    };
     exportReport = {
       mode: "exchange",
       title: "National fallout envelope",
@@ -1121,6 +1134,12 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
     reportBtn.hidden = false;
     shareBtn.hidden = false;
     overviewBtn.hidden = false;
+    startDecaySeries({
+      contours: resp.contours,
+      gz: null, // composite of ~600 sources: no single ground zero
+      maxHours: ENVELOPE_TIME_MAX_HOURS,
+      extraExport: provenance,
+    });
   } catch (err) {
     const msg = err instanceof ApiError ? err.message : String(err);
     markStatusError(`Failed: ${msg}`);
@@ -1483,12 +1502,9 @@ function installHoverPopups(): void {
   }
 }
 
-// Exchange-envelope contours: fixed H+1 dose-rate levels, over the target dots.
-function renderStaticContours(fc: GeoJsonFeatureCollection): void {
-  setContours(fc, colorMatchExpr("dose_rate_h1_rhr", LEVEL_COLORS), 3);
-  renderLegend(fc.features.map((f) => f.properties.dose_rate_h1_rhr).sort((a, b) => a - b));
-  renderTargetLegend();
-}
+// (renderStaticContours removed: the envelope now runs through the same
+// decay-series path as the single plume, which draws and legends its contours
+// per decay time rather than once at fixed H+1 levels.)
 
 // --- ensemble uncertainty bands ---------------------------------------------
 // Exceedance-probability contours (10/50/90%): nested lines from faint outer
@@ -1564,24 +1580,65 @@ function renderEnsembleLegend(probs: number[]): void {
 }
 
 // --- decay-time slider ------------------------------------------------------
+// Drives both the single plume and the national envelope. The relabel trick
+// (decay.ts) needs only that decay scale every point by one common t^-1.2
+// factor: true for a plume, and equally true for the envelope, whose cell-wise
+// max/sum both commute with a positive scalar. What differs per mode is the
+// upper bound and whether there is a ground zero to measure reach from.
+
+interface DecaySeries {
+  contours: GeoJsonFeatureCollection; // dense H+1 level set, relabelled per time
+  gz: [number, number] | null; // null for the envelope: no single GZ, no reach table
+  maxHours: number;
+  extraExport?: Record<string, unknown>; // provenance to keep in the exported GeoJSON
+}
+let decaySeries: DecaySeries | null = null;
 
 function sliderToHours(step: number): number {
   const t = step / SLIDER_STEPS;
   const logMin = Math.log(TIME_MIN_HOURS);
-  const logMax = Math.log(TIME_MAX_HOURS);
+  const logMax = Math.log(decaySeries?.maxHours ?? TIME_MAX_HOURS);
   return Math.exp(logMin + t * (logMax - logMin));
+}
+
+/** Slider ticks for the active range. Positions are log-scale fractions, so
+ * they cannot be hardcoded once the upper bound varies by mode. */
+function renderTimeTicks(maxHours: number): void {
+  const candidates = maxHours <= 24 ? [1, 3, 6, 12, 24] : [1, 6, 24, 48, 168];
+  const hours = candidates.filter((h) => h <= maxHours);
+  const frac = (h: number) => Math.log(h / TIME_MIN_HOURS) / Math.log(maxHours / TIME_MIN_HOURS);
+  const label = (h: number) => (h <= 48 ? `H+${h}` : `H+${Math.round(h / 24)}d`);
+  timeTicks.innerHTML = hours
+    .map((h) => `<option value="${Math.round(frac(h) * SLIDER_STEPS)}"></option>`)
+    .join("");
+  timeTickLabels.innerHTML = hours
+    .map((h) => `<span style="left: ${(frac(h) * 100).toFixed(1)}%">${label(h)}</span>`)
+    .join("");
+}
+
+/** Begin a decay series: install it, reset the slider to H+1, rebuild the ticks
+ * for its range, and draw the first frame. */
+function startDecaySeries(series: DecaySeries): void {
+  decaySeries = series;
+  renderTimeTicks(series.maxHours);
+  timeControl.hidden = false;
+  // The envelope's slider spans ~600 targets assumed simultaneous, so the
+  // arrival-time / simultaneity caveat is shown there and not for one plume.
+  timeCaveat.hidden = series.gz !== null;
+  timeSlider.value = "0";
+  renderAtCurrentTime();
 }
 
 timeSlider.addEventListener("input", renderAtCurrentTime);
 
 function renderAtCurrentTime(): void {
-  if (!currentPlume) return;
+  if (!decaySeries) return;
   const hours = sliderToHours(Number(timeSlider.value));
   timeLabel.textContent = formatHours(hours);
 
-  const picks = levelsForTime(hours, availableLevels(currentPlume.contours));
+  const picks = levelsForTime(hours, availableLevels(decaySeries.contours));
 
-  const features = currentPlume.contours.features
+  const features = decaySeries.contours.features
     .map((f) => {
       const pick = picks.find((p) => p.h1Level === f.properties.dose_rate_h1_rhr);
       if (!pick) return null;
@@ -1597,7 +1654,7 @@ function renderAtCurrentTime(): void {
   setContours(displayed, colorMatchExpr("display_level_rhr", LEVEL_COLORS), 3);
 
   // Legend keys the bands actually DRAWN, not the four we asked for. A band
-  // whose level exceeds this plume's peak dose has no contour (levelsForTime
+  // whose level exceeds this result's peak dose has no contour (levelsForTime
   // omits it), and listing it anyway told the user there was a 1000 R/hr zone
   // on a map that never drew one.
   const shownLevels = [...new Set(features.map((f) => f.properties.display_level_rhr))].sort(
@@ -1615,31 +1672,46 @@ function renderAtCurrentTime(): void {
       `footprint below ${DISPLAY_LEVELS_RHR[0]} R/hr, the lowest plotted band.`;
     legendEl.appendChild(p);
   }
-
-  const gz = currentPlume.ground_zero;
-  const rows: ContourRow[] = [];
-  for (const pick of picks) {
-    const far = farthestPoint(
-      features.filter((f) => f.properties.display_level_rhr === pick.displayLevel),
-      gz,
-    );
-    if (far) {
-      rows.push({
-        swatch: LEVEL_COLORS[pick.displayLevel] ?? [255, 255, 255, 200],
-        label: `${pick.displayLevel} R/hr`,
-        ...far,
-      });
-    }
+  // The envelope's legend also carries the target-category key and the
+  // synthetic-geography badge, and renderLegend() has just cleared them.
+  if (exchangeMode) {
+    renderTargetLegend();
+    renderSyntheticBadge();
   }
-  renderContourTable(`Contour reach at ${timeLabel.textContent}`, rows);
 
-  exportGeoJson = displayed;
-  // The exported contours are at the currently-shown decay time, so the report's
-  // reach + time follow the slider.
-  if (exportReport && exportReport.mode === "plume") {
+  const gz = decaySeries.gz;
+  const rows: ContourRow[] = [];
+  if (gz) {
+    for (const pick of picks) {
+      const far = farthestPoint(
+        features.filter((f) => f.properties.display_level_rhr === pick.displayLevel),
+        gz,
+      );
+      if (far) {
+        rows.push({
+          swatch: LEVEL_COLORS[pick.displayLevel] ?? [255, 255, 255, 200],
+          label: `${pick.displayLevel} R/hr`,
+          ...far,
+        });
+      }
+    }
+    renderContourTable(`Contour reach at ${timeLabel.textContent}`, rows);
+  } else {
+    // Reach-from-ground-zero is meaningless for a composite of ~600 sources.
+    clearContourTable();
+  }
+
+  // Exported contours are the time slice on screen; the envelope also carries
+  // its provenance (weather, deck version, yield policy, included/excluded).
+  exportGeoJson = decaySeries.extraExport
+    ? ({ ...displayed, ...decaySeries.extraExport } as GeoJsonFeatureCollection)
+    : displayed;
+  if (exportReport) {
     exportReport.displayTime = timeLabel.textContent ?? undefined;
-    exportReport.reachCaption = `Contour reach at ${timeLabel.textContent}`;
-    exportReport.reach = rows.map(reachRowPlain);
+    if (gz) {
+      exportReport.reachCaption = `Contour reach at ${timeLabel.textContent}`;
+      exportReport.reach = rows.map(reachRowPlain);
+    }
   }
 }
 
@@ -2053,6 +2125,12 @@ function reportMarkdown(r: ExportReport): string {
   lines.push(`# FalloutCast — ${r.title}`, "");
   lines.push(`_Planning estimate, not an operational product. Generated ${r.generatedIso}._`, "");
   lines.push(`**App:** FalloutCast ${__APP_VERSION__} · **API:** ${__API_URL__}`, "");
+  // The contours are a decay-time slice, so the report has to say which one.
+  // For a plume the time was only implicit in the reach caption; the envelope
+  // has no reach table, so without this its time went unrecorded entirely.
+  if (r.displayTime) {
+    lines.push(`**Contours shown at:** ${r.displayTime} after burst`, "");
+  }
 
   lines.push("## Inputs & assumptions", "");
   for (const [k, v] of r.facts) lines.push(`- **${k}:** ${v}`);

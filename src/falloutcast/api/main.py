@@ -23,7 +23,7 @@ import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import contour, exposure, grid, scenario, targetdeck, targets as targets_mod
@@ -514,6 +514,12 @@ def _weather_provenance(valid_time: str, retrieved_at: float) -> dict:
 # API-facing aggregation names (the honest labels) -> grid.sample_envelope names.
 _AGGREGATION_MAP = {"max_single_source": "max", "sum": "sum"}
 
+# Upper bound on caller-supplied contour levels for the envelope. The decay
+# slider needs ~81 (16 per decade across 1..1e5 R/hr, enough for the 1-1000
+# R/hr bands out to H+24); 200 leaves headroom without letting one request
+# contour an unbounded number of passes over the CONUS grid.
+_MAX_ENVELOPE_LEVELS = 200
+
 
 @app.post("/exchange/envelope", response_model=ExchangeEnvelopeResponse)
 async def exchange_envelope(
@@ -534,6 +540,16 @@ async def exchange_envelope(
         False,
         description="drop the per-hour wind cache first, so every bucket refetches "
         "live winds instead of reusing profiles cached for the current valid hour",
+    ),
+    levels_rhr: list[float] | None = Body(
+        None,
+        embed=True,
+        description="H+1 dose-rate levels to contour. Omit for the four standard "
+        "civil-defense bands. Pass a dense log-spaced set to drive a client-side "
+        "decay-time slider: Way-Wigner decay scales every cell by the same t^-1.2, "
+        "and both aggregations (cell-wise max, cell-wise sum) commute with a "
+        "positive scalar, so the band for level L at time t is exactly the H+1 "
+        "contour for L*t^1.2 -- no recompute per time step.",
     ),
 ) -> ExchangeEnvelopeResponse:
     """Composite dose surface over the CURATED target deck (not "all targets").
@@ -564,6 +580,21 @@ async def exchange_envelope(
             detail=f"aggregation must be one of {list(_AGGREGATION_MAP)}, got {aggregation!r}",
         )
 
+    # Contouring is cheap next to the wind fetches, but each level is a full
+    # pass over a ~480k-cell CONUS grid and lands in the response, so cap it.
+    if levels_rhr is not None:
+        if not levels_rhr or len(levels_rhr) > _MAX_ENVELOPE_LEVELS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"levels_rhr must be a non-empty list of at most "
+                f"{_MAX_ENVELOPE_LEVELS} levels, got {len(levels_rhr)}",
+            )
+        if any(not (lv > 0) for lv in levels_rhr):
+            raise HTTPException(
+                status_code=422, detail="levels_rhr entries must all be positive dose rates"
+            )
+    levels = tuple(levels_rhr) if levels_rhr else contour.DEFAULT_LEVELS
+
     if force_refresh:
         openmeteo.clear_profile_cache()
 
@@ -582,7 +613,7 @@ async def exchange_envelope(
     # deck. Sized beyond the reach of the largest scenario yield so no tail clips.
     radius = 10.0 if expanded else None
     g = grid.sample_envelope(models, radius_deg=radius, aggregation=_AGGREGATION_MAP[aggregation])
-    gj = contour.to_geojson_lonlat(g)
+    gj = contour.to_geojson_lonlat(g, levels=levels)
 
     if per_class:
         yield_policy = scenario.yield_policy({t.category for t in included})

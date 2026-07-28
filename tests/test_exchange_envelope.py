@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from falloutcast import contour, grid
+from falloutcast.physics import decay
 from falloutcast.physics.wseg10 import WSEG10
 
 
@@ -98,6 +99,55 @@ def test_to_geojson_lonlat_is_a_valid_feature_collection():
                 # mile-offsets accidentally left unconverted
                 assert grid.CONUS_LON_MIN - 1 <= lon <= grid.CONUS_LON_MAX + 1
                 assert grid.CONUS_LAT_MIN - 1 <= lat <= grid.CONUS_LAT_MAX + 1
+
+
+@pytest.mark.parametrize("aggregation", ["max", "sum"])
+def test_decay_commutes_with_envelope_aggregation(aggregation):
+    """The web UI's decay-time slider relabels envelope contours client-side
+    instead of recomputing: the band for level L at time t is drawn as the H+1
+    contour for L * t**1.2 (see web/src/decay.ts). That shortcut is only exact
+    if scaling every cell by one Way-Wigner factor commutes with the way
+    per-target contributions are combined.
+
+    It does for both current aggregations, since each is positively homogeneous:
+    max(a*k, b*k) == k*max(a, b) and (a*k + b*k) == k*(a + b). Pinning it here
+    because a future aggregation that is NOT positively homogeneous (a
+    percentile, a log-sum-exp, anything with an additive offset) would silently
+    invalidate every time step the slider draws, with no other test failing.
+    """
+    gz1, gz2 = (40.0, -100.0), (40.05, -100.0)  # overlapping plumes
+    m1, m2 = _model(wind_dir_deg=0.0), _model(wind_dir_deg=180.0)
+    k = 24.0 ** -decay.DECAY_EXPONENT  # Way-Wigner factor at H+24
+
+    kw = dict(resolution_deg=0.05, aggregation=aggregation)
+    single1 = grid.sample_envelope([(m1, *gz1)], **kw)
+    single2 = grid.sample_envelope([(m2, *gz2)], **kw)
+    combined = grid.sample_envelope([(m1, *gz1), (m2, *gz2)], **kw)
+
+    combine = np.maximum if aggregation == "max" else np.add
+    # combine-then-decay (what the slider assumes) == decay-then-combine
+    np.testing.assert_allclose(
+        combined.dose_rate_h1 * k,
+        combine(single1.dose_rate_h1 * k, single2.dose_rate_h1 * k),
+    )
+    assert combined.dose_rate_h1.max() > 0.0  # not a vacuous all-zero comparison
+
+
+def test_to_geojson_lonlat_returns_requested_levels_bit_exactly():
+    """The slider asks the envelope endpoint for a dense log-spaced level set
+    instead of the four defaults, then picks which contour to show by exact
+    float equality on dose_rate_h1_rhr. So requested levels must round-trip
+    unrounded -- any normalisation here would make bands silently undrawable."""
+    g = grid.sample_envelope([(_model(yield_mt=1.0), 41.14, -104.82)], resolution_deg=0.15)
+    # same anchored grid the frontend builds: 16 steps/decade from 1 R/hr
+    levels = tuple(10 ** (i / 16) for i in range(0, 16 * 5 + 1))
+
+    gj = contour.to_geojson_lonlat(g, levels=levels)
+    seen = {f["properties"]["dose_rate_h1_rhr"] for f in gj["features"]}
+
+    assert seen, "expected at least one contour from a 1 Mt surface burst"
+    assert seen <= set(levels), "levels came back altered, not bit-exact"
+    assert len(seen) > len(contour.DEFAULT_LEVELS), "dense set gave no more bands than the defaults"
 
 
 def test_envelope_grid_covers_requested_bounds():

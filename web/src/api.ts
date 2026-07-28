@@ -235,13 +235,25 @@ export function fetchTargets(expanded = false): Promise<Target[]> {
 // /exchange/envelope takes query params, not a JSON body. Under the default
 // per-class scenario the yields come from scenario.py (not the frontend), so no
 // yield params are sent -- only the aggregation policy.
+// `levelsRhr` (optional JSON body) asks for a dense log-spaced set of H+1
+// levels instead of the four standard bands, which is what lets the decay-time
+// slider relabel the envelope client-side. Omitted -> the API's defaults.
 export async function fetchExchangeEnvelope(
   aggregation: Aggregation = "max_single_source",
   forceRefresh = false,
+  levelsRhr?: number[],
 ): Promise<ExchangeEnvelopeResponse> {
   const params = new URLSearchParams({ aggregation });
   if (forceRefresh) params.set("force_refresh", "true");
-  const resp = await fetch(`${__API_URL__}/exchange/envelope?${params}`, { method: "POST" });
+  const resp = await fetch(`${__API_URL__}/exchange/envelope?${params}`, {
+    method: "POST",
+    ...(levelsRhr
+      ? {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ levels_rhr: levelsRhr }),
+        }
+      : {}),
+  });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => resp.statusText);
     throw new ApiError(`/exchange/envelope -> HTTP ${resp.status}: ${detail}`);
