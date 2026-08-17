@@ -1,4 +1,5 @@
 import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
   fetchPlume,
@@ -213,6 +214,17 @@ const exportBtn = document.getElementById("export-btn") as HTMLButtonElement;
 const reportBtn = document.getElementById("report-btn") as HTMLButtonElement;
 const overviewBtn = document.getElementById("overview-btn") as HTMLButtonElement;
 overviewBtn.addEventListener("click", () => returnToOverview());
+// Off-CONUS jumps for the envelope. Map framings only -- no target coordinates
+// are asserted here; these just point the camera at the two states whose deck
+// entries are otherwise off-screen at every default view.
+const jumpHiBtn = document.getElementById("jump-hi-btn") as HTMLButtonElement;
+const jumpAkBtn = document.getElementById("jump-ak-btn") as HTMLButtonElement;
+jumpHiBtn.addEventListener("click", () =>
+  map.flyTo({ center: [-157.5, 20.9], zoom: 6, duration: 800 }),
+);
+jumpAkBtn.addEventListener("click", () =>
+  map.flyTo({ center: [-150.5, 63.5], zoom: 4, duration: 800 }),
+);
 const shareBtn = document.getElementById("share-btn") as HTMLButtonElement;
 // The URL always reflects the last computed scenario (writeUrlState), so
 // sharing is just copying it. No sensitive data: mode, coords, yield, model
@@ -560,6 +572,8 @@ function clearResults(): void {
   reportBtn.hidden = true;
   shareBtn.hidden = true;
   overviewBtn.hidden = true;
+  jumpHiBtn.hidden = true;
+  jumpAkBtn.hidden = true;
   clearStaleNote();
 }
 
@@ -1183,6 +1197,10 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
     reportBtn.hidden = false;
     shareBtn.hidden = false;
     overviewBtn.hidden = false;
+    // Envelope only: these are the deck's off-CONUS sites, and a single-plume
+    // result has nothing to jump to.
+    jumpHiBtn.hidden = false;
+    jumpAkBtn.hidden = false;
     startDecaySeries({
       contours: resp.contours,
       gz: null, // composite of ~600 sources: no single ground zero
@@ -1897,13 +1915,18 @@ function renderLegend(levels: number[]): void {
   legendEl.appendChild(help);
 }
 
-// Category key/legend for the full-exchange target dots, appended below the
-// dose-rate isodose legend.
+// Category key for the full-exchange target dots, below the dose-rate legend.
+// Collapsed by default: twelve rows of near-identical dots turned the panel
+// into a wall, and at national zoom the dots are a few pixels across, so the
+// colors aren't separable until you zoom in anyway -- which is exactly when
+// someone goes looking for the key.
 function renderTargetLegend(): void {
-  const title = document.createElement("div");
-  title.className = "legend-title";
-  title.textContent = "Targets (ground zeros)";
-  legendEl.appendChild(title);
+  const wrap = document.createElement("details");
+  wrap.className = "legend-group";
+  const summary = document.createElement("summary");
+  summary.textContent = `Targets (ground zeros) — ${Object.keys(TARGET_LABELS).length} types`;
+  wrap.appendChild(summary);
+  legendEl.appendChild(wrap);
   for (const [cat, label] of Object.entries(TARGET_LABELS)) {
     const row = document.createElement("div");
     row.className = "legend-row";
@@ -1916,7 +1939,7 @@ function renderTargetLegend(): void {
     const text = document.createElement("span");
     text.textContent = label;
     row.appendChild(text);
-    legendEl.appendChild(row);
+    wrap.appendChild(row);
   }
 }
 

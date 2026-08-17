@@ -3,8 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FalloutCast</title>
-    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+    <title>FalloutCast — weather-driven fallout planning estimate</title>
+    <meta
+      name="description"
+      content="Weather-driven nuclear fallout planning estimates: single-plume, ensemble
+      uncertainty bands, and a national envelope, driven by live forecast winds. A
+      planning estimate from simplified models, not an operational product."
+    />
+    <!-- Imported from the installed maplibre-gl package (see src/main.ts) rather
+    than a CDN: the library itself is already an npm dependency, so a second copy
+    pinned by hand in a <link> was a version-drift and offline-failure risk. -->
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -381,6 +389,11 @@
 
         <div class="result-actions">
           <button type="button" id="overview-btn" hidden>Overview</button>
+          <!-- The deck includes Hawaii and Alaska sites, and the grid was
+          widened so their plumes actually compute -- but they sit far outside
+          the default CONUS view, so nothing on screen suggested they exist. -->
+          <button type="button" id="jump-hi-btn" hidden>Hawaii</button>
+          <button type="button" id="jump-ak-btn" hidden>Alaska</button>
           <button type="button" id="export-btn" hidden>Download GeoJSON</button>
           <button type="button" id="report-btn" hidden>Download report</button>
           <button type="button" id="share-btn" hidden>Copy link</button>
