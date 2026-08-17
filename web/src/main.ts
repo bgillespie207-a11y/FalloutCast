@@ -27,7 +27,7 @@ import {
   TIME_MAX_HOURS,
 } from "./decay";
 import { describeAge, fmtNum, formatHours } from "./format";
-import { compassName, farthestPoint } from "./geo";
+import { compassName, contourFillFeatures, farthestPoint } from "./geo";
 import {
   exportMetadata,
   fmtLonLat,
@@ -57,6 +57,11 @@ const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 // coarse enough that a single arrow-key press is a perceptible move (the
 // reviewer found 1000 steps made keyboard nudges invisible).
 const SLIDER_STEPS = 200;
+
+// Per-band fill alpha. Low, because the bands nest: a point in the innermost
+// zone is covered by every band's fill, so the tint compounds toward the hot
+// core while a lone outer band stays light enough to read the map through.
+const CONTOUR_FILL_OPACITY = 0.22;
 
 // Fixed color per civil-defense dose-rate band. Colors are from the Okabe-Ito
 // colorblind-safe palette (Okabe & Ito 2008) plus black, ordered by strictly
@@ -136,8 +141,10 @@ const TARGET_LABELS: Record<string, string> = {
 // separate overlay canvas that can fail silently (the failure mode the review
 // flagged). If the basemap draws, the overlay draws.
 const CONTOUR_SOURCE = "fc-contours";
+const CONTOUR_FILL_SOURCE = "fc-contour-fills";
 const TARGET_SOURCE = "fc-targets";
 const FIELD_SOURCE = "fc-fields";
+const CONTOUR_FILL_LAYER = "fc-contour-fill";
 const CONTOUR_LAYER = "fc-contour-lines";
 const TARGET_LAYER = "fc-target-circles";
 const FIELD_LAYER = "fc-field-outlines";
@@ -327,10 +334,35 @@ function setupMapOverlay(): void {
   if (mapSetupDone) return;
 
   try {
-    for (const id of [FIELD_SOURCE, TARGET_SOURCE, CONTOUR_SOURCE]) {
+    for (const id of [FIELD_SOURCE, TARGET_SOURCE, CONTOUR_SOURCE, CONTOUR_FILL_SOURCE]) {
       if (!map.getSource(id)) {
         map.addSource(id, { type: "geojson", data: EMPTY_FC as GeoJSON.FeatureCollection });
       }
+    }
+
+    // Translucent band fills, UNDER the basemap's own labels: a contour line
+    // alone leaves which side is hot to inference, which is what made the
+    // national envelope read as ~600 overlapping rings rather than areas.
+    // Bands nest (1000 R/hr inside 100 inside 10 inside 1), so the constant
+    // per-band opacity accumulates toward the center -- severity reads as
+    // depth of tint, on top of the palette's existing lightness ordering.
+    // Inserted before the first symbol layer so city names stay legible; the
+    // contour LINES stay above everything as the authoritative geometry.
+    if (!map.getLayer(CONTOUR_FILL_LAYER)) {
+      const firstSymbol = map.getStyle()?.layers?.find((l) => l.type === "symbol")?.id;
+      map.addLayer(
+        {
+          id: CONTOUR_FILL_LAYER,
+          type: "fill",
+          source: CONTOUR_FILL_SOURCE,
+          paint: {
+            "fill-color": "rgba(255,255,255,0.8)",
+            "fill-opacity": CONTOUR_FILL_OPACITY,
+            "fill-antialias": true,
+          },
+        },
+        firstSymbol,
+      );
     }
 
     // Documented field FOOTPRINTS (the verifiable geography). Dashed outline
@@ -1382,7 +1414,9 @@ function targetSource(): maplibregl.GeoJSONSource {
   return map.getSource(TARGET_SOURCE) as maplibregl.GeoJSONSource;
 }
 
-/** Set the contour features and their color/width paint for the current mode. */
+/** Set the contour features and their color/width paint for the current mode.
+ * The same color expression drives the fills beneath them, so a band's area and
+ * its outline can never disagree about which color means which level. */
 function setContours(
   fc: GeoJsonFeatureCollection,
   colorExpr: unknown,
@@ -1391,6 +1425,21 @@ function setContours(
   contourSource().setData(fc as unknown as GeoJSON.FeatureCollection);
   map.setPaintProperty(CONTOUR_LAYER, "line-color", colorExpr as maplibregl.ExpressionSpecification);
   map.setPaintProperty(CONTOUR_LAYER, "line-width", widthExpr as number);
+
+  const fills: GeoJsonFeatureCollection = {
+    type: "FeatureCollection",
+    features: contourFillFeatures(fc.features),
+  };
+  (map.getSource(CONTOUR_FILL_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
+    fills as unknown as GeoJSON.FeatureCollection,
+  );
+  if (map.getLayer(CONTOUR_FILL_LAYER)) {
+    map.setPaintProperty(
+      CONTOUR_FILL_LAYER,
+      "fill-color",
+      colorExpr as maplibregl.ExpressionSpecification,
+    );
+  }
 }
 
 // The clear helpers run outside ensureMapReady (mode switches, the guard
@@ -1400,9 +1449,11 @@ function setContours(
 // SYNCHRONOUSLY before the compute's try/finally, wedging the UI with the
 // button disabled and the busy spinner on forever (reproduced live).
 function clearContours(): void {
-  (map.getSource(CONTOUR_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
-    EMPTY_FC as GeoJSON.FeatureCollection,
-  );
+  for (const id of [CONTOUR_SOURCE, CONTOUR_FILL_SOURCE]) {
+    (map.getSource(id) as maplibregl.GeoJSONSource | undefined)?.setData(
+      EMPTY_FC as GeoJSON.FeatureCollection,
+    );
+  }
 }
 
 async function plotTargetMarkers(): Promise<void> {

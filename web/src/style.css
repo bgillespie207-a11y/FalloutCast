@@ -585,6 +585,12 @@ button:disabled {
   width: 14px;
   height: 3px;
   flex-shrink: 0;
+  /* The palettes run to near-black at the top of each scale (1000 R/hr is
+     pure black; the 90% ensemble band is #08306b), which vanished completely
+     against the dark panel -- the most severe key had no visible swatch. A
+     hairline in the panel's own border color keeps every swatch legible in
+     both themes without altering the color it is showing. */
+  box-shadow: 0 0 0 1px var(--border-soft);
 }
 
 /* Persistent numeric readout of the rendered contours. */

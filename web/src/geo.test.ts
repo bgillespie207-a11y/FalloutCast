@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { GeoJsonFeatureCollection } from "./api";
-import { compassName, farthestPoint, haversineKm, initialBearingDeg } from "./geo";
+import {
+  compassName,
+  contourFillFeatures,
+  farthestPoint,
+  haversineKm,
+  initialBearingDeg,
+} from "./geo";
 
 const feature = (
   type: string,
@@ -134,5 +140,106 @@ describe("farthestPoint", () => {
   it("ignores the elevation slot in a 3-element position", () => {
     const best = farthestPoint([feature("LineString", [[-77, 39.5, 120]])], gz)!;
     expect(best.km).toBeCloseTo(haversineKm(38.9, -77, 39.5, -77), 9);
+  });
+});
+
+describe("contourFillFeatures", () => {
+  // Square rings, all concentric about the origin, given as MultiLineString --
+  // the shape the API actually returns.
+  const square = (r: number, closed = true): number[][] => {
+    const ring = [
+      [-r, -r],
+      [r, -r],
+      [r, r],
+      [-r, r],
+    ];
+    return closed ? [...ring, [-r, -r]] : ring;
+  };
+  const multiLine = (rings: number[][][], props: Record<string, number> = { display_level_rhr: 10 }) =>
+    ({
+      type: "Feature",
+      properties: props,
+      geometry: { type: "MultiLineString", coordinates: rings },
+    }) as GeoJsonFeatureCollection["features"][number];
+
+  const coords = (f: GeoJsonFeatureCollection["features"][number]) =>
+    f.geometry.coordinates as number[][][][];
+
+  it("turns a closed contour into a MultiPolygon, keeping its properties", () => {
+    const [out] = contourFillFeatures([multiLine([square(1)])]);
+    expect(out.geometry.type).toBe("MultiPolygon");
+    expect(out.properties).toEqual({ display_level_rhr: 10 });
+    expect(coords(out)).toEqual([[square(1)]]);
+  });
+
+  it("closes a contour that ran off the edge of the computed grid", () => {
+    // Grid-clipped contours come back open; without closing them the largest
+    // band of a big plume would be the one band that never fills.
+    const [out] = contourFillFeatures([multiLine([square(1, false)])]);
+    const ring = coords(out)[0][0];
+    expect(ring[0]).toEqual(ring[ring.length - 1]);
+    expect(ring).toHaveLength(5);
+  });
+
+  it("treats a ring inside another as a hole, not a second filled area", () => {
+    // A pocket the contour encloses but does not cover. Painting it solid
+    // would claim a hazard the model didn't compute there.
+    const [out] = contourFillFeatures([multiLine([square(10), square(2)])]);
+    const polys = coords(out);
+    expect(polys).toHaveLength(1); // one filled region...
+    expect(polys[0]).toHaveLength(2); // ...with one hole
+    expect(polys[0][0]).toEqual(square(10));
+    expect(polys[0][1]).toEqual(square(2));
+  });
+
+  it("fills an island inside a hole again", () => {
+    const [out] = contourFillFeatures([multiLine([square(10), square(6), square(2)])]);
+    const polys = coords(out);
+    expect(polys).toHaveLength(2); // outer region + the island
+    expect(polys[0]).toEqual([square(10), square(6)]); // hole attached to its parent
+    expect(polys[1]).toEqual([square(2)]);
+  });
+
+  it("attaches each hole to the innermost ring that contains it", () => {
+    // Two separate regions, each with its own pocket: a hole must not be
+    // attached to whichever exterior ring happened to come first.
+    const shift = (rings: number[][], dx: number) => rings.map(([x, y]) => [x + dx, y]);
+    const out = contourFillFeatures([
+      multiLine([square(3), shift(square(3), 100), square(1), shift(square(1), 100)]),
+    ]);
+    const polys = coords(out[0]);
+    expect(polys).toHaveLength(2);
+    for (const poly of polys) {
+      expect(poly).toHaveLength(2);
+      // The hole sits inside its own exterior ring, not 100 units away.
+      expect(Math.abs(poly[0][0][0] - poly[1][0][0])).toBeLessThan(10);
+    }
+  });
+
+  it("keeps disjoint regions as separate polygons of one MultiPolygon", () => {
+    const shift = (rings: number[][], dx: number) => rings.map(([x, y]) => [x + dx, y]);
+    const [out] = contourFillFeatures([multiLine([square(1), shift(square(1), 50)])]);
+    expect(coords(out)).toHaveLength(2);
+    expect(coords(out)[0]).toHaveLength(1); // no holes
+  });
+
+  it("drops rings that cannot bound an area", () => {
+    // Marching squares can emit two-point fragments; a fill from one would be
+    // a degenerate sliver.
+    expect(contourFillFeatures([multiLine([[[0, 0], [1, 1]]])])).toEqual([]);
+    expect(contourFillFeatures([multiLine([[[0, 0], [1, 1], [0, 0]]])])).toEqual([]);
+  });
+
+  it("accepts a plain LineString as well as MultiLineString", () => {
+    const f = {
+      type: "Feature",
+      properties: { display_level_rhr: 1 },
+      geometry: { type: "LineString", coordinates: square(1) },
+    } as GeoJsonFeatureCollection["features"][number];
+    expect(coords(contourFillFeatures([f])[0])).toEqual([[square(1)]]);
+  });
+
+  it("returns nothing for an empty set", () => {
+    expect(contourFillFeatures([])).toEqual([]);
   });
 });
