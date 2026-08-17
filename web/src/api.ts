@@ -58,6 +58,7 @@ export interface PlumeResponse {
 }
 
 export interface Target {
+  id: string; // stable deck identifier; matches included/excluded_target_ids
   name: string;
   lat: number;
   lon: number;

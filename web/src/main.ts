@@ -239,6 +239,7 @@ const exposurePfSelect = document.getElementById("exposure-pf") as HTMLSelectEle
 const exposureDosesEl = document.getElementById("exposure-doses") as HTMLDivElement;
 const exposureSetGzBtn = document.getElementById("exposure-set-gz") as HTMLButtonElement;
 const exposureNotesEl = document.getElementById("exposure-notes") as HTMLDivElement;
+const exclusionWarningEl = document.getElementById("exclusion-warning") as HTMLDivElement;
 const weatherInfoEl = document.getElementById("weather-info") as HTMLDivElement;
 const weatherTextEl = document.getElementById("weather-text") as HTMLSpanElement;
 const weatherRefreshBtn = document.getElementById("weather-refresh") as HTMLButtonElement;
@@ -385,10 +386,28 @@ function setupMapOverlay(): void {
         type: "circle",
         source: TARGET_SOURCE,
         paint: {
-          "circle-radius": ["match", ["get", "category"], "icbm_lf", 2.5, 4],
+          // Excluded targets (wind fetch failed, no plume computed) are drawn
+          // larger with a red ring: a bare dot on an empty map otherwise reads
+          // as a computed target with nothing around it.
+          "circle-radius": [
+            "case",
+            ["==", ["get", "excluded"], 1],
+            5.5,
+            ["match", ["get", "category"], "icbm_lf", 2.5, 4],
+          ] as unknown as number,
           "circle-color": categoryColorExpr() as maplibregl.ExpressionSpecification,
-          "circle-stroke-width": 0.5,
-          "circle-stroke-color": "rgba(255,255,255,0.7)",
+          "circle-stroke-width": [
+            "case",
+            ["==", ["get", "excluded"], 1],
+            2,
+            0.5,
+          ] as unknown as number,
+          "circle-stroke-color": [
+            "case",
+            ["==", ["get", "excluded"], 1],
+            "rgba(200,40,40,0.95)",
+            "rgba(255,255,255,0.7)",
+          ] as unknown as string,
         },
       });
     }
@@ -1119,7 +1138,8 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
     stopElapsed();
     setDisclaimer(resp.disclaimer);
     await plotFieldPolygons();
-    await plotTargetMarkers();
+    await plotTargetMarkers(new Set(resp.excluded_target_ids));
+    renderExclusionWarning(resp.excluded_target_ids, resp.n_targets);
     map.flyTo({ center: OVERVIEW, zoom: OVERVIEW_ZOOM });
 
     writeUrlState({ mode: "exchange" });
@@ -1456,20 +1476,53 @@ function clearContours(): void {
   }
 }
 
-async function plotTargetMarkers(): Promise<void> {
+/** Plot the deck's ground zeros. `excludedIds` are targets the envelope could
+ * not compute (wind fetch failed): they are still drawn -- omitting them would
+ * hide that the deck contains them -- but flagged, so a dot with no plume
+ * around it can't be read as "computed, and nothing here". */
+async function plotTargetMarkers(excludedIds: Set<string> = new Set()): Promise<void> {
   const targets = await fetchTargets(true);
+  lastExcludedNames = targets.filter((t) => excludedIds.has(t.id)).map((t) => t.name);
   const fc: GeoJSON.FeatureCollection = {
     type: "FeatureCollection",
     features: targets.map((t) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [t.lon, t.lat] },
-      properties: { name: t.name, category: t.category },
+      properties: {
+        name: t.name,
+        category: t.category,
+        excluded: excludedIds.has(t.id) ? 1 : 0,
+      },
     })),
   };
   targetSource().setData(fc);
 }
 
+// Names of the targets the last envelope dropped, resolved from the deck once
+// the markers are fetched (the API reports ids; the user needs names).
+let lastExcludedNames: string[] = [];
+
+function renderExclusionWarning(excludedIds: string[], nTotal: number): void {
+  if (excludedIds.length === 0) {
+    exclusionWarningEl.hidden = true;
+    exclusionWarningEl.textContent = "";
+    return;
+  }
+  const named = lastExcludedNames.length > 0 ? lastExcludedNames : excludedIds;
+  const shown = named.slice(0, 6).join("; ");
+  const more = named.length > 6 ? ` and ${named.length - 6} more` : "";
+  exclusionWarningEl.innerHTML =
+    `⚠ <strong>${excludedIds.length} of ${nTotal + excludedIds.length} targets produced no plume.</strong> ` +
+    `Their wind fetch failed, so nothing is drawn for them and this envelope ` +
+    `understates the hazard near them — an empty area around one of these is ` +
+    `missing data, not a clear result. Their ground zeros are ringed in red on ` +
+    `the map. Excluded: ${shown}${more}. "Refresh winds" retries the fetch.`;
+  exclusionWarningEl.hidden = false;
+}
+
 function clearTargetMarkers(): void {
+  lastExcludedNames = [];
+  renderExclusionWarning([], 0);
   // Optional-chained for the same reason as clearContours.
   (map.getSource(TARGET_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(
     EMPTY_FC as GeoJSON.FeatureCollection,
@@ -1529,10 +1582,13 @@ function installHoverPopups(): void {
     if (text) popup.setLngLat(e.lngLat).setText(text).addTo(map);
   };
   const showTarget = (e: maplibregl.MapLayerMouseEvent) => {
-    const p = e.features?.[0]?.properties as { name?: string; category?: string } | undefined;
+    const p = e.features?.[0]?.properties as
+      | { name?: string; category?: string; excluded?: number }
+      | undefined;
     if (!p?.name || !p.category) return;
     const label = TARGET_LABELS[p.category] ?? p.category;
-    popup.setLngLat(e.lngLat).setText(`${p.name} — ${label}`).addTo(map);
+    const excluded = p.excluded ? " — NO PLUME: wind fetch failed for this target" : "";
+    popup.setLngLat(e.lngLat).setText(`${p.name} — ${label}${excluded}`).addTo(map);
   };
   for (const [layer, handler] of [[CONTOUR_LAYER, showContour], [TARGET_LAYER, showTarget]] as const) {
     map.on("mousemove", layer, handler);

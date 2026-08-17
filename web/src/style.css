@@ -776,7 +776,8 @@ button:disabled {
 }
 
 /* Synthetic-geography badge for the exchange view (honest provenance). */
-.geo-badge {
+.geo-badge,
+.warn-badge {
   margin-top: 0.6rem;
   padding: 0.5rem 0.6rem;
   font-size: 0.75rem;
