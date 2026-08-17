@@ -27,6 +27,19 @@ import {
   TIME_MIN_HOURS,
   TIME_MAX_HOURS,
 } from "./decay";
+import { describeAge, fmtNum, formatHours } from "./format";
+import { compassName, farthestPoint } from "./geo";
+import {
+  KM_PER_MI,
+  fmtDose,
+  formatHeightShort,
+  formatReach,
+  formatSpeed,
+  formatSpeedShort,
+  getUnitSystem,
+  setUnitSystem,
+  type UnitSystem,
+} from "./units";
 
 // Free, keyless vector basemap (openfreemap.org) -- no API key/signup needed,
 // which matters for a project meant to run out of the box.
@@ -679,69 +692,45 @@ for (const tab of [tabSingle, tabExchange]) {
 }
 
 // --- display units ------------------------------------------------------------
-// A global preference (persisted) for whether distances/speeds read metric- or
-// US-first, and whether an approximate Sv dose reference is shown. Distances are
-// always shown in BOTH units; the toggle picks which is primary. Wind speed
-// switches km/h <-> mph. Dose stays in R (the model's native roentgen) with an
-// approximate Sv shown in metric mode -- clearly labeled, since R->Sv is only a
-// whole-body-gamma rule of thumb (1 R ~ 10 mSv effective).
+// The preference itself and every formatter that reads it live in units.ts
+// (unit-tested there); what stays here is the DOM side -- the radiogroup, the
+// persisted choice, and re-rendering what's already on screen after a switch.
 
-type UnitSystem = "metric" | "us";
 const UNITS_KEY = "falloutcast.units";
-let unitSystem: UnitSystem = localStorage.getItem(UNITS_KEY) === "us" ? "us" : "metric";
-
-const KM_PER_MI = 1.609344;
-const MSV_PER_R = 10; // ~1 R exposure ~ 10 mSv effective dose, whole-body gamma (approx)
-
-function fmtDist(v: number): string {
-  return v >= 10 ? v.toFixed(0) : v.toFixed(1);
-}
-
-// Wind speed, primary per preference with the other in parentheses.
-function formatSpeed(mph: number): string {
-  const kmh = mph * KM_PER_MI;
-  return unitSystem === "metric"
-    ? `${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)`
-    : `${mph.toFixed(0)} mph (${kmh.toFixed(0)} km/h)`;
-}
-// Compact, primary-unit-only speed for the wind-profile rows.
-function formatSpeedShort(mph: number): string {
-  return unitSystem === "metric" ? `${(mph * KM_PER_MI).toFixed(0)} km/h` : `${mph.toFixed(0)} mph`;
-}
-function formatHeightShort(p: WindProfilePoint): string {
-  return unitSystem === "metric" ? `${(p.height_m / 1000).toFixed(1)} km` : `${p.height_kft.toFixed(0)} kft`;
-}
-// Approximate SI dose for a roentgen figure (metric mode only).
-function svApprox(r: number): string {
-  const mSv = r * MSV_PER_R;
-  return mSv >= 1000 ? `${(mSv / 1000).toFixed(mSv >= 10000 ? 0 : 1)} Sv` : `${mSv.toFixed(mSv >= 10 ? 0 : 1)} mSv`;
-}
+setUnitSystem(localStorage.getItem(UNITS_KEY) === "us" ? "us" : "metric");
 
 // Checked state + roving tabindex for the two radio buttons. A radiogroup is a
 // single tab stop: only the checked option is tabbable, and the arrow keys move
 // (and select) within the group.
 function syncUnitButtons(): void {
-  unitsMetricBtn.setAttribute("aria-checked", String(unitSystem === "metric"));
-  unitsUsBtn.setAttribute("aria-checked", String(unitSystem === "us"));
-  unitsMetricBtn.tabIndex = unitSystem === "metric" ? 0 : -1;
-  unitsUsBtn.tabIndex = unitSystem === "us" ? 0 : -1;
+  const metric = getUnitSystem() === "metric";
+  unitsMetricBtn.setAttribute("aria-checked", String(metric));
+  unitsUsBtn.setAttribute("aria-checked", String(!metric));
+  unitsMetricBtn.tabIndex = metric ? 0 : -1;
+  unitsUsBtn.tabIndex = metric ? -1 : 0;
 }
 
-function setUnitSystem(sys: UnitSystem): void {
-  unitSystem = sys;
+function selectUnitSystem(sys: UnitSystem): void {
+  setUnitSystem(sys);
   localStorage.setItem(UNITS_KEY, sys);
   syncUnitButtons();
   applyUnits();
 }
-unitsMetricBtn.addEventListener("click", () => setUnitSystem("metric"));
-unitsUsBtn.addEventListener("click", () => setUnitSystem("us"));
+unitsMetricBtn.addEventListener("click", () => selectUnitSystem("metric"));
+unitsUsBtn.addEventListener("click", () => selectUnitSystem("us"));
 for (const btn of [unitsMetricBtn, unitsUsBtn]) {
   btn.addEventListener("keydown", (e) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const next =
-      e.key === "Home" ? "metric" : e.key === "End" ? "us" : unitSystem === "metric" ? "us" : "metric";
-    setUnitSystem(next as UnitSystem);
+      e.key === "Home"
+        ? "metric"
+        : e.key === "End"
+          ? "us"
+          : getUnitSystem() === "metric"
+            ? "us"
+            : "metric";
+    selectUnitSystem(next as UnitSystem);
     (next === "metric" ? unitsMetricBtn : unitsUsBtn).focus();
   });
 }
@@ -1765,11 +1754,6 @@ function renderTargetLegend(): void {
   }
 }
 
-function formatHours(hours: number): string {
-  if (hours < 48) return `H+${hours.toFixed(1)}h`;
-  return `H+${(hours / 24).toFixed(1)}d`;
-}
-
 // --- persistent contour table -------------------------------------------------
 // A numeric readout of each rendered band: how far its contour reaches from
 // ground zero and in which compass direction. The map alone encoded results in
@@ -1778,64 +1762,6 @@ function formatHours(hours: number): string {
 // so reach-from-GZ is meaningless there and no table is rendered.
 
 const contourTableEl = document.getElementById("contour-table") as HTMLDivElement;
-
-const EARTH_RADIUS_KM = 6371;
-const DEG = Math.PI / 180;
-
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const dLat = (lat2 - lat1) * DEG;
-  const dLon = (lon2 - lon1) * DEG;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * DEG) * Math.cos(lat2 * DEG) * Math.sin(dLon / 2) ** 2;
-  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a));
-}
-
-function initialBearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const y = Math.sin((lon2 - lon1) * DEG) * Math.cos(lat2 * DEG);
-  const x =
-    Math.cos(lat1 * DEG) * Math.sin(lat2 * DEG) -
-    Math.sin(lat1 * DEG) * Math.cos(lat2 * DEG) * Math.cos((lon2 - lon1) * DEG);
-  return (Math.atan2(y, x) / DEG + 360) % 360;
-}
-
-const COMPASS_16 = [
-  "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
-];
-function compassName(bearing: number): string {
-  return COMPASS_16[Math.round(bearing / 22.5) % 16];
-}
-
-/** Farthest vertex of the given contour features from ground zero (gz is
- * [lon, lat], GeoJSON order). Null if the features have no coordinates. */
-function farthestPoint(
-  features: GeoJsonFeatureCollection["features"],
-  gz: [number, number],
-): { km: number; bearing: number } | null {
-  let best: { km: number; bearing: number } | null = null;
-  const visit = (coords: unknown): void => {
-    if (typeof (coords as number[])[0] === "number" && (coords as number[]).length >= 2) {
-      const [lon, lat] = coords as number[];
-      const km = haversineKm(gz[1], gz[0], lat, lon);
-      if (!best || km > best.km) {
-        best = { km, bearing: initialBearingDeg(gz[1], gz[0], lat, lon) };
-      }
-    } else if (Array.isArray(coords)) {
-      for (const c of coords) visit(c);
-    }
-  };
-  for (const f of features) visit(f.geometry.coordinates);
-  return best;
-}
-
-// Distance in both units, primary per the units preference.
-function formatReach(km: number): string {
-  const mi = km / KM_PER_MI;
-  return unitSystem === "metric"
-    ? `${fmtDist(km)} km (${fmtDist(mi)} mi)`
-    : `${fmtDist(mi)} mi (${fmtDist(km)} km)`;
-}
 
 interface ContourRow {
   swatch: [number, number, number, number];
@@ -1896,16 +1822,6 @@ function clearContourTable(): void {
 // Click a point while a Tier-0 plume is shown -> POST /exposure with the SAME
 // parameters/wind that plume used -> arrival time, rates, and windowed/
 // lifetime doses (optionally divided by an assumed protection factor).
-
-const MI_TO_KM = 1.609344;
-
-function fmtNum(v: number): string {
-  if (v >= 100) return v.toFixed(0);
-  if (v >= 10) return v.toFixed(1);
-  if (v >= 0.01) return v.toPrecision(2);
-  if (v === 0) return "0";
-  return v.toExponential(1);
-}
 
 function closeExposure(): void {
   exposureSection.hidden = true;
@@ -1986,14 +1902,9 @@ async function inspectExposure(lat: number, lon: number): Promise<void> {
 let lastExposureResp: PointExposureResponse | null = null;
 
 // A roentgen dose figure, with an approximate Sv appended in metric mode.
-function fmtDose(r: number): string {
-  const base = `${fmtNum(r)} R`;
-  return unitSystem === "metric" ? `${base} (≈ ${svApprox(r)})` : base;
-}
-
 function renderExposure(resp: PointExposureResponse): void {
   lastExposureResp = resp;
-  const km = resp.distance_miles * MI_TO_KM;
+  const km = resp.distance_miles * KM_PER_MI;
   const dir = `${compassName(resp.bearing_from_gz_deg)} (${Math.round(resp.bearing_from_gz_deg)}°)`;
 
   const lines: string[] = [
@@ -2034,7 +1945,7 @@ function renderExposure(resp: PointExposureResponse): void {
   exposureDosesEl.innerText = doseLines.join("\n");
 
   const notes = [...resp.notes];
-  if (unitSystem === "metric") {
+  if (getUnitSystem() === "metric") {
     notes.push("Sv figures approximate: 1 R ≈ 10 mSv effective dose (whole-body gamma).");
   }
   exposureNotesEl.innerText = notes.join("\n\n");
@@ -2204,13 +2115,6 @@ reportBtn.addEventListener("click", () => {
 // the valid hour actually used, and fetch staleness, with a control to refetch.
 // Hidden whenever the last compute fetched nothing (manual wind) or carries no
 // provenance (ensemble responses).
-
-function describeAge(seconds: number): string {
-  if (seconds < 90) return "just now";
-  const min = Math.round(seconds / 60);
-  if (min < 90) return `${min} min ago`;
-  return `${(min / 60).toFixed(1)} h ago`;
-}
 
 function renderWeather(w: WeatherProvenance | null | undefined): void {
   if (!w) {
