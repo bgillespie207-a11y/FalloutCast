@@ -20,7 +20,12 @@ import math
 
 from .physics import decay
 from .physics.wseg10 import WSEG10
-from .schemas import DISCLAIMER, DoseSample, PointExposureRequest, PointExposureResponse
+from .schemas import (
+    DISCLAIMER_EXPOSURE,
+    DoseSample,
+    PointExposureRequest,
+    PointExposureResponse,
+)
 
 # Kept in sync with contour.py/grid.py (same deliberate duplication as
 # grid.py's own copy -- see the note there).
@@ -104,6 +109,6 @@ def assess(req: PointExposureRequest) -> PointExposureResponse:
         sheltered_dose_window_r=window_sheltered,
         unsheltered_dose_to_infinity_r=inf_unsheltered,
         sheltered_dose_to_infinity_r=inf_unsheltered / req.protection_factor,
-        disclaimer=DISCLAIMER,
+        disclaimer=DISCLAIMER_EXPOSURE,
         notes=notes,
     )

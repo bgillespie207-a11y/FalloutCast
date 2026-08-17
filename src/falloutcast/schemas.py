@@ -229,9 +229,69 @@ class ExchangeEnvelopeResponse(BaseModel):
     contours: dict  # one FeatureCollection of isodose contours
 
 
-DISCLAIMER = (
-    "Planning estimate only, not an operational product. Uses the WSEG-10 "
-    "analytic fallout model driven by a single effective wind; it assumes a "
-    "flat-terrain surface burst and does not resolve local terrain, "
-    "fractionation, or hot spots. Do not use for real-world decisions."
+# --- disclaimers, one per model ------------------------------------------------
+# This text is the frontend's "Methodology & limits" panel: whatever the
+# response carries is what the user is told the result came from. A single
+# shared string therefore described WSEG-10 to everyone -- including Tier-1 and
+# ensemble results, which do not run it. Each compute path now returns the
+# limits of the model it actually ran.
+#
+# The lede/coda are shared so the panel reads consistently and only the
+# genuinely model-dependent middle changes.
+
+_LEDE = "Planning estimate only, not an operational product. "
+_CODA = " Do not use for real-world decisions."
+
+DISCLAIMER_TIER0 = (
+    _LEDE + "Uses the WSEG-10 analytic fallout model driven by a single "
+    "effective wind; it assumes a flat-terrain surface burst and does not "
+    "resolve local terrain, fractionation, or hot spots." + _CODA
+)
+
+# Back-compat alias: Tier-0/WSEG-10 is the default model, and this name is what
+# the rest of the codebase imported before the split.
+DISCLAIMER = DISCLAIMER_TIER0
+
+DISCLAIMER_TIER1 = (
+    _LEDE + "Uses the multi-layer (Tier-1) model: the stabilized cloud is "
+    "split into height layers and particle-size bins, each falling at its own "
+    "terminal velocity through the fetched vertical wind profile, so the "
+    "pattern bends with wind shear. That profile is taken as horizontally "
+    "uniform (one sounding, at ground zero), the burst is treated as a "
+    "flat-terrain surface burst, and terrain, fractionation, and hot spots are "
+    "not resolved. Activity is converted to dose rate with a calibration "
+    "anchored to the Glasstone & Dolan (1977) idealized pattern, not to "
+    "measured shots." + _CODA
+)
+
+DISCLAIMER_ENSEMBLE = (
+    _LEDE + "Runs the multi-layer (Tier-1) model once per GFS-ensemble wind "
+    "member and maps how many members put a location above the chosen dose "
+    "rate. The spread between bands is WIND-forecast uncertainty only: it "
+    "does not include uncertainty in the fallout model itself, the yield, the "
+    "fission fraction, or the deposition calibration, so the true uncertainty "
+    "is wider than the bands show. Tier-1's own limits apply to every member "
+    "(horizontally uniform wind profile, flat-terrain surface burst, no "
+    "terrain/fractionation/hot spots)." + _CODA
+)
+
+DISCLAIMER_ENVELOPE = (
+    _LEDE + "Composites one WSEG-10 (Tier-0) surface-burst plume per target "
+    "across a curated, incomplete target deck onto a single national grid. "
+    "Under 'max_single_source' each cell shows the worst H+1 dose rate from "
+    "any ONE target -- a screening envelope, not a combined total, and not a "
+    "forecast of any particular attack. Yields are illustrative per-class "
+    "attacker assumptions rather than the targets' own weapons, every site is "
+    "modeled as a surface burst (a fallout-maximizing bounding case), and some "
+    "ground zeros are synthetic illustrative positions. Tier-0's limits apply "
+    "to each plume." + _CODA
+)
+
+DISCLAIMER_EXPOSURE = (
+    _LEDE + "Assesses one point under the WSEG-10 (Tier-0) plume shown, using "
+    "that plume's own wind: arrival time from the cloud-transport model and "
+    "accumulated dose from Way-Wigner t^-1.2 decay. Dose rates are unshielded "
+    "outdoor values; any protection factor is your assumption, not an estimate "
+    "of a real structure. It models neither shielding geometry, nor "
+    "weathering, nor internal (inhaled/ingested) dose." + _CODA
 )

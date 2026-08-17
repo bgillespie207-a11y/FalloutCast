@@ -32,7 +32,10 @@ from ..physics import tier1
 from ..physics import units
 from ..physics.wseg10 import WSEG10, cloud_top_height_m
 from ..schemas import (
-    DISCLAIMER,
+    DISCLAIMER_ENSEMBLE,
+    DISCLAIMER_ENVELOPE,
+    DISCLAIMER_TIER0,
+    DISCLAIMER_TIER1,
     DoseRequest,
     DoseResponse,
     DoseSample,
@@ -301,7 +304,7 @@ async def ensemble_band(req: EnsembleRequest) -> EnsembleResponse:
     return EnsembleResponse(
         ground_zero=[req.lon, req.lat], level_rhr=req.level_rhr,
         n_members=res.n_members, mean_fraction_aloft=res.mean_fraction_aloft,
-        disclaimer=DISCLAIMER, notes=notes, contours=gj,
+        disclaimer=DISCLAIMER_ENSEMBLE, notes=notes, contours=gj,
     )
 
 
@@ -328,7 +331,9 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
         contours = _tier0_contours(req, wind)
         return PlumeResponse(
             ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=0,
-            wind=wind, disclaimer=DISCLAIMER, notes=notes, weather=weather,
+            # Tier-0 ran, so Tier-0's limits are the ones that apply -- the
+            # downgrade note above says why.
+            wind=wind, disclaimer=DISCLAIMER_TIER0, notes=notes, weather=weather,
             wind_profile=_wind_profile_points(profile, req.yield_mt) if profile else None,
             contours=contours,
         )
@@ -347,7 +352,7 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
         return PlumeResponse(
             ground_zero=[req.lon, req.lat], tier_requested=1, tier_used=1,
             wind=WindUsed(source="open-meteo-gfs-profile"),
-            disclaimer=DISCLAIMER, notes=notes, fraction_aloft=aloft,
+            disclaimer=DISCLAIMER_TIER1, notes=notes, fraction_aloft=aloft,
             weather=_weather_provenance(profile.valid_time, profile.retrieved_at),
             wind_profile=_wind_profile_points(profile, req.yield_mt),
             contours=contours,
@@ -361,7 +366,7 @@ async def plume(req: PlumeRequest) -> PlumeResponse:
     contours = _tier0_contours(req, wind)
     return PlumeResponse(
         ground_zero=[req.lon, req.lat], tier_requested=0, tier_used=0,
-        wind=wind, disclaimer=DISCLAIMER, notes=notes, weather=weather,
+        wind=wind, disclaimer=DISCLAIMER_TIER0, notes=notes, weather=weather,
         wind_profile=_wind_profile_points(profile, req.yield_mt) if profile else None,
         contours=contours,
     )
@@ -397,7 +402,9 @@ async def exchange(yield_mt: float = 0.3, fission_fraction: float = 0.5) -> dict
                 "contours": contours,
             }
         )
-    return {"disclaimer": DISCLAIMER, "yield_mt": yield_mt, "targets": results}
+    # Each target here is an independent Tier-0 plume (this endpoint overlays
+    # them rather than compositing a grid, so no envelope caveats apply).
+    return {"disclaimer": DISCLAIMER_TIER0, "yield_mt": yield_mt, "targets": results}
 
 
 # Wind-fetch scaling for large decks. Fetching one live wind per target is fine
@@ -659,7 +666,7 @@ async def exchange_envelope(
         yield_policy=yield_policy,
         included_target_ids=[t.id for t in included],
         excluded_target_ids=[t.id for t in excluded],
-        disclaimer=DISCLAIMER,
+        disclaimer=DISCLAIMER_ENVELOPE,
         notes=notes,
         weather=weather,
         contours=gj,
