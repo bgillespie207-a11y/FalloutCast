@@ -12,9 +12,9 @@ what's next.")
   The credential is cached in the macOS keychain, so `git push` works
   non-interactively. **Workflow: commit → `git branch -f main delfic-fractionation`
   → `git push origin main`.**
-- **Latest commit:** `46f4642` (envelope aggregation toggle). Local branch,
+- **Latest commit:** `1c0c5f4` (Cloudflare deploy setup). Local branch,
   `main`, and `origin/main` are all in sync as of 2026-08-17 — nothing unpushed.
-- **Tests:** **131 backend** (`source .venv/bin/activate && pytest -q` from repo
+- **Tests:** **135 backend** (`source .venv/bin/activate && pytest -q` from repo
   root) + **103 frontend** (`npm --prefix web test`). The frontend suite is new
   as of 2026-08-17; the standing "no frontend tests" gap is closed for the pure
   logic, see "What's next" for what's still uncovered.
@@ -243,16 +243,25 @@ three modes, both themes, desktop and mobile). Everything actioned is pushed;
    is now done** (warning + red-ringed dots, 2026-08-17); what's left is the
    backend half — a stronger retry for buckets holding a single target, so the
    plume doesn't depend on one fetch succeeding.
-3. **Deploy** — currently local-only dev servers. Needs a Python API host, a
-   static host, and CORS/`FALLOUTCAST_API_URL` wiring. Real scope; only worth it
-   if you want it shareable.
+3. **Deploy — set up 2026-08-17, not yet run.** See `DEPLOY.md`. One Cloudflare
+   Worker serves the built frontend and proxies `/api/*` to a Container running
+   the FastAPI app from `./Dockerfile`. Everything is committed and verified
+   locally except the Worker→container hop (wrangler dev can't reach containers
+   under Colima). **Three things are the user's to do: enable the Workers Paid
+   plan ($5/mo — Containers aren't on the free tier), `npx wrangler login`, and
+   `npm run deploy`.**
 4. Minor: revisiting the naval_base/air_base/missile_defense split. (The
    "jump to Hawaii/Alaska" control was done 2026-08-17.)
 
 ## Architecture map (where things live)
 
 ```
+Dockerfile              API container image (linux/amd64 pinned)
+wrangler.jsonc          Cloudflare Worker + Container config
+worker/index.ts         /api/* -> container, else -> web/dist assets
+DEPLOY.md               how to deploy, sizing/cost, what's unverified
 src/falloutcast/
+  data/                 the curated deck, shipped AS PACKAGE DATA (not repo root)
   physics/wseg10.py     Tier-0 analytic model (time_of_arrival here)
   physics/tier1.py      Tier-1 multi-layer advection (_DOSE_CONV anchored to G&D)
   physics/decay.py      Way-Wigner decay + accumulated_dose
