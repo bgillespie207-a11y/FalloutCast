@@ -1145,7 +1145,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
     writeUrlState({ mode: "exchange" });
     clearStaleNote(); // inputs now match the result on screen
     statusEl.textContent =
-      `Max-single-source envelope across ${resp.n_targets} target(s).`;
+      `Max-single-source envelope across ${resp.n_targets} ${resp.n_targets === 1 ? "target" : "targets"}.`;
     renderWeather(resp.weather); // valid hour + staleness live here now
     renderPlainNotes(resp.notes);
     // Full provenance (weather, aggregation, yield policy, deck version/hash,
@@ -1282,9 +1282,16 @@ function readUrlState(): void {
 // but every later initializer was dead, and the envelope compute then failed
 // with "Cannot access 'deckMeta' before initialization".
 
+// Tier-1 has no single wind vector to quote -- it advects each layer through a
+// whole profile -- so the API reports only a source slug. Left raw, the status
+// line read "Wind: open-meteo-gfs-profile."
+const WIND_SOURCE_NAMES: Record<string, string> = {
+  "open-meteo-gfs-profile": "full vertical profile (Open-Meteo GFS), shown under Wind by altitude",
+};
+
 function describeWind(resp: PlumeResponse): string {
   const w = resp.wind;
-  if (w.speed_mph == null) return w.source;
+  if (w.speed_mph == null) return WIND_SOURCE_NAMES[w.source] ?? w.source;
   return `${formatSpeed(w.speed_mph)} @ ${w.bearing_deg?.toFixed(0)}° (${w.source})`;
 }
 
@@ -1292,8 +1299,15 @@ function describeWind(resp: PlumeResponse): string {
  * string at compute time) so applyUnits can rebuild it when the unit
  * preference changes -- describeWind's primary unit is unit-dependent. */
 function plumeStatusText(resp: PlumeResponse): string {
-  const inspectHint = inspectContext ? " Click the map to assess a point." : "";
   const tier = TIER_NAMES[resp.tier_used] ?? `Tier ${resp.tier_used}`;
+  // Point assessment needs one known effective wind, so it exists on Tier-0
+  // only. Saying nothing made the feature look broken on Tier-1: the "click
+  // the map" invitation simply disappeared, with no reason given.
+  const inspectHint = inspectContext
+    ? " Click the map to assess a point."
+    : resp.tier_used === 1
+      ? " Point assessment is available on the fast planning model (Tier 0)."
+      : "";
   return `${tier} used. Wind: ${describeWind(resp)}.${inspectHint}`;
 }
 
@@ -1598,6 +1612,12 @@ function installHoverPopups(): void {
       popup.remove();
     });
   }
+  // Touch has no hover, so a target dot was unidentifiable on a phone: the only
+  // way to learn what a ground zero is was a mouse. Tapping one names it.
+  // Deliberately NOT wired for contour lines -- a tap there already means
+  // "assess this point" (or "set ground zero"), and hijacking it would trade
+  // one interaction for another rather than adding one.
+  map.on("click", TARGET_LAYER, showTarget);
 }
 
 // (renderStaticContours removed: the envelope now runs through the same
@@ -1639,7 +1659,7 @@ function renderEnsembleLegend(probs: number[]): void {
   legendEl.innerHTML = "";
   const title = document.createElement("div");
   title.className = "legend-title";
-  title.textContent = "Chance H+1 dose rate exceeds the level (hover a band)";
+  title.textContent = "Chance the H+1 dose rate exceeds your chosen level";
   legendEl.appendChild(title);
   for (const p of probs) {
     const row = document.createElement("div");
@@ -1822,7 +1842,10 @@ function renderLegend(levels: number[]): void {
   if (levels.length > 0) {
     const title = document.createElement("div");
     title.className = "legend-title";
-    title.textContent = "Dose-rate isodose lines (hover a contour for its value)";
+    // Descriptive first, term second (the pattern the input labels already
+    // follow), and no promise of a hover interaction that touch can't make --
+    // the numbers live in the reach table below regardless.
+    title.textContent = "Dose-rate bands (isodose contours) — outdoor rate at the time shown";
     legendEl.appendChild(title);
   }
   for (const level of levels) {
@@ -1838,6 +1861,40 @@ function renderLegend(levels: number[]): void {
     row.appendChild(label);
     legendEl.appendChild(row);
   }
+
+  if (levels.length === 0) return;
+
+  // A band with no contour is omitted (decay.levelsForTime), which is correct
+  // but reads as a bug when a band that was there a moment ago disappears
+  // mid-drag. Say why, whenever the full set isn't showing.
+  if (levels.length < DISPLAY_LEVELS_RHR.length) {
+    const missing = document.createElement("p");
+    missing.className = "hint";
+    missing.textContent =
+      "Bands not listed don't exist anywhere on this result at this time — " +
+      "either the plume never reached that dose rate, or decay has taken it below.";
+    legendEl.appendChild(missing);
+  }
+
+  // Outputs got none of the jargon help the inputs did: R/hr was never
+  // defined anywhere in the UI. Kept strictly to the conversion the app
+  // already uses elsewhere (1 R ~ 10 mSv, whole-body gamma) -- no new
+  // health claims, and it points at the tools that answer "how much dose?"
+  const help = document.createElement("details");
+  help.className = "help";
+  const summary = document.createElement("summary");
+  summary.textContent = "What do these levels mean?";
+  help.appendChild(summary);
+  const p = document.createElement("p");
+  p.textContent =
+    "R/hr is roentgen per hour: the dose rate outdoors and unshielded, at the " +
+    "time shown on the slider. It is a RATE, not a dose — an hour spent in a " +
+    "1 R/hr area is about 1 R (~10 mSv, whole-body gamma), and the same spot " +
+    "is far less hazardous a day later because fallout decays. For how much " +
+    "dose a specific place accumulates, and when fallout arrives there, click " +
+    "the map to assess that point.";
+  help.appendChild(p);
+  legendEl.appendChild(help);
 }
 
 // Category key/legend for the full-exchange target dots, appended below the

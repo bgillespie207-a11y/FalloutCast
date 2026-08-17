@@ -638,9 +638,12 @@ async def exchange_envelope(
         if aggregation == "max_single_source"
         else "sum of overlapping H+1 contributions (simultaneous total, not time-aligned)"
     )
+    def _targets(n: int) -> str:
+        return f"{n} target" if n == 1 else f"{n} targets"
+
     notes = [
         f"Aggregation '{aggregation}': at each point, {agg_desc}. "
-        f"{len(included)} target(s) on one shared CONUS grid.",
+        f"{_targets(len(included))} on one shared CONUS grid.",
         scenario.SURFACE_BURST_CAVEAT,
     ]
     if expanded:
@@ -653,7 +656,7 @@ async def exchange_envelope(
     if excluded:
         ex_ids = [t.id for t in excluded]
         shown = ", ".join(ex_ids[:5]) + (f", +{len(ex_ids) - 5} more" if len(ex_ids) > 5 else "")
-        notes.append(f"Excluded {len(excluded)} target(s) with failed wind fetch: {shown}.")
+        notes.append(f"Excluded {_targets(len(excluded))} with failed wind fetch: {shown}.")
     notes.append(
         f"Winds valid {weather['valid_time']}Z from {weather['model']}"
         + (f", retrieved {weather['retrieved_at']}." if weather["retrieved_at"] else ".")
