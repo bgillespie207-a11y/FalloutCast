@@ -12,10 +12,10 @@ what's next.")
   The credential is cached in the macOS keychain, so `git push` works
   non-interactively. **Workflow: commit → `git branch -f main delfic-fractionation`
   → `git push origin main`.**
-- **Latest commit:** `f502281` (frontend test suite). Local branch, `main`, and
-  `origin/main` are all in sync as of 2026-08-17 — nothing unpushed.
-- **Tests:** **118 backend** (`source .venv/bin/activate && pytest -q` from repo
-  root) + **91 frontend** (`npm --prefix web test`). The frontend suite is new
+- **Latest commit:** `46f4642` (envelope aggregation toggle). Local branch,
+  `main`, and `origin/main` are all in sync as of 2026-08-17 — nothing unpushed.
+- **Tests:** **131 backend** (`source .venv/bin/activate && pytest -q` from repo
+  root) + **103 frontend** (`npm --prefix web test`). The frontend suite is new
   as of 2026-08-17; the standing "no frontend tests" gap is closed for the pure
   logic, see "What's next" for what's still uncovered.
 - **Versions:** API + pyproject + web/package.json all `0.3.0` (kept in sync).
@@ -192,6 +192,40 @@ browser rather than unit-tested:
 - `urlstate.ts` — `buildUrlParams`/`parseUrlParams` round trips + guards.
 - `report.ts` — `exportMetadata`/`reportMarkdown` and their caveat-carrying.
 
+## Full app review (done 2026-08-17)
+
+A content + UI review of the whole app (source pass, then a live pass over all
+three modes, both themes, desktop and mobile). Everything actioned is pushed;
+`git log` has the detail. The findings worth remembering:
+
+- **Per-model disclaimers.** `response.disclaimer` is what the UI's
+  "Methodology & limits" panel shows, and every endpoint returned the same
+  WSEG-10 text — so Tier-1 and ensemble results described a model they didn't
+  run (reproduced live: the status line said Tier 1 while the panel said
+  single-wind WSEG-10). There are now five (`schemas.py`), one per compute
+  path, and `test_disclaimers.py` pins each. **If you add a compute path, give
+  it its own disclaimer**; the bare `DISCLAIMER` alias is Tier-0's text.
+- **Contour fills.** The API returns contours as MultiLineString — boundaries,
+  not regions. `contourFillFeatures` (geo.ts) polygonizes them client-side for
+  a translucent fill under the line; the line remains authoritative. It
+  resolves nesting: rings enclosed an odd number of deep are HOLES, and the
+  live envelope really has them (6 at H+1), so don't "simplify" that away —
+  filling a hole claims hazard the model didn't compute. Grid-clipped contours
+  arrive open and are closed with a chord (under-covers near the grid edge,
+  which is the safe direction).
+- **Excluded targets are now visible** (the old candidate #2): a warning under
+  the status line naming them, and their ground zeros ringed in red, because a
+  dot with no plume otherwise looked identical to a computed-and-clean target.
+  Retrying is "Refresh winds". The lone-bucket hardening itself (a stronger
+  retry for solo wind buckets) is still **not** done.
+- **`aggregation=sum` is reachable now** — it was implemented and honestly
+  named server-side but hardcoded to `max_single_source` in the UI. It's in the
+  shared link (`?agg=`) because it changes what the contours mean.
+- **Auto-fit framing was deliberately left alone.** Filling the bands fixed the
+  "inner zones are sub-pixel" problem that motivated changing it; framing on
+  the 10 R/hr band instead would push the outer edge off-screen and understate
+  the footprint.
+
 ## What's next (nothing is tracked/committed-to — these are candidates)
 
 1. **Extend the frontend suite to the compute paths.** What's covered is the
@@ -205,14 +239,15 @@ browser rather than unit-tested:
    Omaha plume DOES compute (confirmed on the map and in the contour data), but
    Offutt is the **only target in its ~1° wind-fetch bucket** and Omaha is not a
    deck city — so if that single Open-Meteo fetch fails, the whole Omaha plume
-   silently vanishes (it lands in `excluded_target_ids` + a note). Options: a
-   visible UI warning when strategic targets are excluded, and/or a stronger
-   retry for solo buckets. Not implemented.
+   silently vanishes (it lands in `excluded_target_ids` + a note). **The UI half
+   is now done** (warning + red-ringed dots, 2026-08-17); what's left is the
+   backend half — a stronger retry for buckets holding a single target, so the
+   plume doesn't depend on one fetch succeeding.
 3. **Deploy** — currently local-only dev servers. Needs a Python API host, a
    static host, and CORS/`FALLOUTCAST_API_URL` wiring. Real scope; only worth it
    if you want it shareable.
-4. Minor: a "jump to Hawaii/Alaska" control (those plumes are off-screen at the
-   default CONUS view); revisiting the naval_base/air_base/missile_defense split.
+4. Minor: revisiting the naval_base/air_base/missile_defense split. (The
+   "jump to Hawaii/Alaska" control was done 2026-08-17.)
 
 ## Architecture map (where things live)
 
@@ -239,7 +274,8 @@ web/
   src/api.ts            typed API client
   src/decay.ts          client-side decay relabeling for the time slider
   src/units.ts          metric/US preference + unit-dependent formatters
-  src/geo.ts            haversine, bearing, compass, farthestPoint
+  src/geo.ts            haversine, bearing, compass, farthestPoint,
+                        contourFillFeatures (lines -> fillable polygons)
   src/format.ts         unit-independent number/time formatting
   src/urlstate.ts       shareable-link query build/parse
   src/report.ts         export report -> GeoJSON metadata + Markdown
@@ -252,7 +288,10 @@ docs/
 ## Gotchas (learned the hard way this session)
 
 - **Restart the :8010 API to see backend changes** (uvicorn without --reload
-  won't pick them up; a stale process silently serves old code).
+  won't pick them up; a stale process silently serves old code). When
+  `run-dev.sh` is the one running it, `kill` the uvicorn PID and its restart
+  loop respawns it in ~2 s with fresh code — no need to interrupt the user's
+  terminal.
 - **HMR mid-click** can make one compute fail transiently after a hot reload;
   a fresh page load or a retry is fine. Not a code bug.
 - **Number-input Enter** doesn't reliably submit the form in the automated
