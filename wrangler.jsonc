@@ -1,0 +1,56 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "falloutcast",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-17",
+
+  // The built frontend. `npm run build:web` (root package.json) builds it with
+  // FALLOUTCAST_API_URL=/api so it calls this same Worker.
+  "assets": {
+    "directory": "web/dist",
+    "binding": "ASSETS",
+    // The app is a single page; deep links and a refresh on any path must
+    // return index.html rather than a 404.
+    "not_found_handling": "single-page-application"
+  },
+
+  "containers": [
+    {
+      "class_name": "FalloutcastApi",
+      "image": "./Dockerfile",
+      // Sized from measurement, not guesswork: the heaviest endpoint (sum
+      // envelope across 600 targets) peaks at 72 MB RSS and ~1.2 s of CPU
+      // warm, so `basic` (1 GiB / 0.25 vCPU) leaves ~14x memory headroom.
+      // Containers bill by instance size for the time they're awake, so
+      // over-provisioning here is a standing cost for no gain. Bump to
+      // "standard-1" if the national envelope feels slow -- it is the only
+      // endpoint where CPU is noticeable; a single plume is dominated by its
+      // one wind fetch.
+      "instance_type": "basic",
+      // A hard ceiling on concurrent instances, i.e. on the bill. One instance
+      // serves every request fine at this scale; this is a runaway guard.
+      "max_instances": 2
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FALLOUTCAST_API",
+        "class_name": "FalloutcastApi"
+      }
+    ]
+  },
+
+  // Container-backed Durable Objects must be SQLite-backed.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FalloutcastApi"]
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

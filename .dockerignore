@@ -1,0 +1,22 @@
+# Keep the build context to what the API actually needs: pyproject.toml + src/.
+# Everything else (the 600-target frontend bundle, the venv, git history) would
+# be uploaded to the daemon on every build and inflate the pushed image.
+.venv/
+.git/
+.github/
+web/
+docs/
+tests/
+node_modules/
+dist/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.claude/
+scratchpad/
+run-dev.sh
+wrangler.jsonc
+worker/
+package.json
+package-lock.json

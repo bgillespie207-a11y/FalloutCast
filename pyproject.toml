@@ -23,6 +23,13 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The curated target deck is package data, not repo-root data: without this it
+# is silently omitted from the built wheel and every deck-backed endpoint
+# raises FileNotFoundError in an installed environment (e.g. the container
+# image), while continuing to work in a source checkout.
+[tool.setuptools.package-data]
+falloutcast = ["data/*.geojson"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
