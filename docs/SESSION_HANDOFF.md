@@ -1,8 +1,9 @@
 # FalloutCast — Session Handoff (UX-review backlog)
 
-Written 2026-07-16. Read this first if you're picking up the remaining work.
-(There is an older `docs/HANDOFF.md` from the physics-era session; this file
-supersedes it for "what's the current state and what's next.")
+Written 2026-07-16, **last updated 2026-07-29**. Read this first if you're
+picking up the remaining work. (There is an older `docs/HANDOFF.md` from the
+physics-era session; this file supersedes it for "what's the current state and
+what's next.")
 
 ## Snapshot
 
@@ -11,14 +12,25 @@ supersedes it for "what's the current state and what's next.")
   The credential is cached in the macOS keychain, so `git push` works
   non-interactively. **Workflow: commit → `git branch -f main delfic-fractionation`
   → `git push origin main`.**
-- **Latest commit:** see `git log` (backlog #22 usability-polish cluster landed
-  2026-07-16 as seven commits after `b4d5171`).
-- **Tests:** 105 passing — `source .venv/bin/activate && pytest -q` from repo root.
+- **Latest commit:** `1c1c739` (run-dev.sh). Local branch, `main`, and
+  `origin/main` are all in sync as of 2026-07-29 — nothing unpushed.
+- **Tests:** **118 passing** — `source .venv/bin/activate && pytest -q` from repo
+  root. (Frontend still has NO test suite — the standing gap; see "What's next".)
 - **Versions:** API + pyproject + web/package.json all `0.3.0` (kept in sync).
-- **Working tree:** clean.
+- **Target deck:** **600 ground zeros**, dataset version `2025.8-more-bases`.
+- **Working tree:** two INTENTIONALLY uncommitted local files —
+  `.claude/launch.json` (has a `chemprep` dev-server entry for an unrelated
+  project at `~/Downloads/chem281-prep`) and `.claude/settings.local.json`.
+  **Leave both alone; do not commit them and do not touch chem281-prep.**
 
 ## Running it (verify changes in the browser)
 
+**Preferred: `bash run-dev.sh`** — starts BOTH servers, each in a restart loop,
+from the user's own terminal. Servers started from inside an agent/tool session
+get reaped when that session ends, which is why they kept "crashing"; run-dev.sh
+is the durable fix. Leave the window open; Ctrl-C stops both.
+
+Manually, if needed:
 ```bash
 # API (must restart to pick up backend changes; --reload helps)
 source .venv/bin/activate && uvicorn falloutcast.api.main:app --reload --port 8010
@@ -26,7 +38,7 @@ source .venv/bin/activate && uvicorn falloutcast.api.main:app --reload --port 80
 npm --prefix web run dev            # http://localhost:5173
 ```
 Frontend typecheck: `cd web && npx tsc -b`. There is no frontend unit-test
-suite yet (a gap; see #22).
+suite yet (a gap; see "What's next").
 
 ## House rules (binding — every prior commit followed them)
 
@@ -133,10 +145,50 @@ loading after the last styledata event, e.g. in a background tab.)
   profile / exposure panel in place (state stored in `lastContourTable`,
   `lastWindProfilePoints`, `lastExposureResp`) — no recompute.
 
-**#23 is complete.** No tracked backlog items remain. (Ad-hoc follow-ups noted in
-git history if wanted: an optional "jump to Hawaii/Alaska" control so those
-plumes are discoverable without panning; revisiting the naval_base/air_base/
-missile_defense category split.)
+**#23 is complete.** Both tracked review tasks (#22, #23) are done.
+
+## Work after the backlog (2026-07-20 → 07-29)
+
+All landed and pushed. Not part of #22/#23 — driven by user spot-checks:
+
+- **Target deck expansion, 537 → 600 ground zeros.** (a) Population centers were
+  the top-25 by *municipal* population, an artifact of city limits that hid big
+  metros (Cleveland, Milwaukee, Raleigh…); rebased on the ~50 largest **metro
+  areas** (49 entries). (b) Added Hawaii/Alaska strategic sites (Pearl Harbor,
+  JBER, Eielson, Fort Greely GMD, Clear SFS) — this required widening the
+  envelope grid to `grid.US_*` bounds, because the local-window path SKIPS
+  targets outside the grid, which would have made them bare dots with no plume.
+  (c) Added Hoover + Grand Coulee dams. (d) Two passes of major military bases
+  (~32): all major combatant-command HQs, Army/Marine posts (new `army_base`
+  category), more AF/Navy. Every addition: public installation centroids, public
+  role in the note, **no troop counts asserted as sourced data**.
+- **UI/UX:** results-panel reorder + heading consistency + dividers; dark theme
+  via a token palette; a11y (real tabpanel, roving tabindex, radiogroup arrow
+  keys, focus rings); mobile fixes; stale-result flagging.
+- **Bug fixes:** map overlay gate, contour band mislabeling, level-set waste,
+  unit toggle on the status line.
+- **Decay-time slider for the national envelope** (H+1 → H+24), with tests.
+- **run-dev.sh** (see "Running it").
+
+## What's next (nothing is tracked/committed-to — these are candidates)
+
+1. **Frontend test suite** — the clearest real gap. Backend has 118 tests; the
+   frontend has zero, despite `main.ts` now holding unit conversions, decay-time
+   relabeling, URL-state round-trips, report/metadata builders, and geometry
+   helpers (`farthestPoint`, `compassName`). A Vitest suite over the pure
+   functions is self-contained and high-leverage. **Recommended.**
+2. **USSTRATCOM/Offutt lone-bucket hardening.** Investigated 2026-07-29: the
+   Omaha plume DOES compute (confirmed on the map and in the contour data), but
+   Offutt is the **only target in its ~1° wind-fetch bucket** and Omaha is not a
+   deck city — so if that single Open-Meteo fetch fails, the whole Omaha plume
+   silently vanishes (it lands in `excluded_target_ids` + a note). Options: a
+   visible UI warning when strategic targets are excluded, and/or a stronger
+   retry for solo buckets. Not implemented.
+3. **Deploy** — currently local-only dev servers. Needs a Python API host, a
+   static host, and CORS/`FALLOUTCAST_API_URL` wiring. Real scope; only worth it
+   if you want it shareable.
+4. Minor: a "jump to Hawaii/Alaska" control (those plumes are off-screen at the
+   default CONUS view); revisiting the naval_base/air_base/missile_defense split.
 
 ## Architecture map (where things live)
 
@@ -198,3 +250,15 @@ docs/
   elapsed tickers/timeouts lag there; `read_network_requests` does not record
   the page's cross-origin :8010 fetches, and uvicorn only logs requests on
   completion — check all three before concluding "no request was sent".
+- **Dev servers started inside an agent session get reaped with it.** They will
+  appear to "crash" repeatedly. Don't keep restarting them from the session —
+  tell the user to run `bash run-dev.sh` in their own terminal.
+- **Adding a target outside the CONUS box needs a grid change.** The envelope's
+  local-window path (`radius_deg`) skips any target whose window falls entirely
+  outside the grid bounds, producing a bare dot with NO plume and no error.
+  `grid.US_*` currently covers CONUS + HI + AK; widen it before adding targets
+  beyond that, and add a coverage test (see `test_exchange_envelope.py`).
+- **New target categories need three edits, or they degrade silently:**
+  `scenario.py` (yield — otherwise it falls back to `_DEFAULT` and the yield
+  policy misreports), plus `TARGET_COLORS` and `TARGET_LABELS` in `main.ts`
+  (otherwise grey dot + raw slug in the legend).
