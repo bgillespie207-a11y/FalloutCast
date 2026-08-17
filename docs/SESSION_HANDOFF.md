@@ -12,10 +12,12 @@ what's next.")
   The credential is cached in the macOS keychain, so `git push` works
   non-interactively. **Workflow: commit → `git branch -f main delfic-fractionation`
   → `git push origin main`.**
-- **Latest commit:** `1c1c739` (run-dev.sh). Local branch, `main`, and
-  `origin/main` are all in sync as of 2026-07-29 — nothing unpushed.
-- **Tests:** **118 passing** — `source .venv/bin/activate && pytest -q` from repo
-  root. (Frontend still has NO test suite — the standing gap; see "What's next".)
+- **Latest commit:** `f502281` (frontend test suite). Local branch, `main`, and
+  `origin/main` are all in sync as of 2026-08-17 — nothing unpushed.
+- **Tests:** **118 backend** (`source .venv/bin/activate && pytest -q` from repo
+  root) + **91 frontend** (`npm --prefix web test`). The frontend suite is new
+  as of 2026-08-17; the standing "no frontend tests" gap is closed for the pure
+  logic, see "What's next" for what's still uncovered.
 - **Versions:** API + pyproject + web/package.json all `0.3.0` (kept in sync).
 - **Target deck:** **600 ground zeros**, dataset version `2025.8-more-bases`.
 - **Working tree:** two INTENTIONALLY uncommitted local files —
@@ -37,8 +39,8 @@ source .venv/bin/activate && uvicorn falloutcast.api.main:app --reload --port 80
 # Frontend (defaults to the :8010 API)
 npm --prefix web run dev            # http://localhost:5173
 ```
-Frontend typecheck: `cd web && npx tsc -b`. There is no frontend unit-test
-suite yet (a gap; see "What's next").
+Frontend typecheck: `cd web && npx tsc -b`. Frontend tests:
+`npm --prefix web test` (Vitest, `test:watch` for the watcher).
 
 ## House rules (binding — every prior commit followed them)
 
@@ -170,13 +172,35 @@ All landed and pushed. Not part of #22/#23 — driven by user spot-checks:
 - **Decay-time slider for the national envelope** (H+1 → H+24), with tests.
 - **run-dev.sh** (see "Running it").
 
+## Frontend test suite (done 2026-08-17)
+
+**91 tests, `npm --prefix web test`.** Vitest runs on the app's own
+`vite.config.ts`, so the `__API_URL__` / `__APP_VERSION__` defines apply with no
+test-only shim; node environment, no jsdom. Vitest brings a nested Vite of its
+own — the app's dev server and build stay on vite 5, and the config-loader
+warning printed on every test run comes from that nested copy, not from the app.
+
+Getting there meant extracting the pure logic that was buried in `main.ts`
+(2263 → 2053 lines); the DOM wiring stays there and is still verified in the
+browser rather than unit-tested:
+
+- `decay.ts` (already pure) — level-grid anchoring, band omission, relabel direction.
+- `api.ts` — per-endpoint URL/method/body, error detail preserved.
+- `units.ts` — the metric/US preference + every formatter that reads it.
+- `geo.ts` — haversine/bearing/compass/`farthestPoint`.
+- `format.ts` — `fmtNum`, `formatHours`, `describeAge`.
+- `urlstate.ts` — `buildUrlParams`/`parseUrlParams` round trips + guards.
+- `report.ts` — `exportMetadata`/`reportMarkdown` and their caveat-carrying.
+
 ## What's next (nothing is tracked/committed-to — these are candidates)
 
-1. **Frontend test suite** — the clearest real gap. Backend has 118 tests; the
-   frontend has zero, despite `main.ts` now holding unit conversions, decay-time
-   relabeling, URL-state round-trips, report/metadata builders, and geometry
-   helpers (`farthestPoint`, `compassName`). A Vitest suite over the pure
-   functions is self-contained and high-leverage. **Recommended.**
+1. **Extend the frontend suite to the compute paths.** What's covered is the
+   pure layer; what isn't is everything DOM-bound in `main.ts` — the three
+   compute functions, `renderContourTable`/`renderEnsembleContours`,
+   `plumeNotesFor`, `sliderToHours` (reads module state), coordinate validation,
+   and the stale-result guards. Those need either jsdom or another extraction
+   pass. Worth doing only if `main.ts` keeps growing; the browser check
+   (house rule 4) currently covers them.
 2. **USSTRATCOM/Offutt lone-bucket hardening.** Investigated 2026-07-29: the
    Omaha plume DOES compute (confirmed on the map and in the contour data), but
    Offutt is the **only target in its ~1° wind-fetch bucket** and Omaha is not a
@@ -210,10 +234,16 @@ src/falloutcast/
                         castle_bravo (measured)
 web/
   index.html            single page: #panel (controls) + #map, <main>, skip links
-  src/main.ts           all UI logic: compute paths, native MapLibre layers,
+  src/main.ts           DOM/UI logic: compute paths, native MapLibre layers,
                         mode toggles, elapsed timer, fit/validation helpers
   src/api.ts            typed API client
   src/decay.ts          client-side decay relabeling for the time slider
+  src/units.ts          metric/US preference + unit-dependent formatters
+  src/geo.ts            haversine, bearing, compass, farthestPoint
+  src/format.ts         unit-independent number/time formatting
+  src/urlstate.ts       shareable-link query build/parse
+  src/report.ts         export report -> GeoJSON metadata + Markdown
+  src/*.test.ts         Vitest suites (91 tests), one per module above
   src/style.css         layout (flex column, responsive @media max-width:700px)
 docs/
   PRD.md TARGET_DECK.md TIER1_SPEC.md   kept current
@@ -238,7 +268,10 @@ docs/
   DOM-level assertions via `javascript_tool` work regardless. The app-side
   recovery (setup retry in `ensureMapReady`) means computes succeed once the
   style JSON is in, even if the canvas can't paint until the tab is visible.
-- The frontend has **no unit-test suite** still (unchanged gap; #23 note).
+- **Pure logic belongs outside `main.ts`.** Anything added there that doesn't
+  touch the DOM is untestable where it sits; put it in units/geo/format/
+  urlstate/report (or a new sibling) and test it. `main.ts` importing a helper
+  costs nothing.
 - **Compute-before-map-ready is a guarded path now**: the clear helpers
   (`clearContours` etc.) are optional-chained because `map.getSource()` is
   undefined until `setupMapOverlay` runs — an unguarded `.setData()` there
