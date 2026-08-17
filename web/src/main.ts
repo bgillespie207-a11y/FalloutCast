@@ -15,7 +15,6 @@ import {
   type PointExposureResponse,
   type WeatherProvenance,
   type WindProfilePoint,
-  type YieldPolicy,
   type GeoJsonFeatureCollection,
   type TargetDeckMeta,
 } from "./api";
@@ -30,6 +29,14 @@ import {
 import { describeAge, fmtNum, formatHours } from "./format";
 import { compassName, farthestPoint } from "./geo";
 import {
+  exportMetadata,
+  fmtLonLat,
+  reportMarkdown,
+  weatherFactStr,
+  type ExportReport,
+  type ReachRow,
+} from "./report";
+import {
   KM_PER_MI,
   fmtDose,
   formatHeightShort,
@@ -40,6 +47,7 @@ import {
   setUnitSystem,
   type UnitSystem,
 } from "./units";
+import { buildUrlParams, parseUrlParams, type UrlMode } from "./urlstate";
 
 // Free, keyless vector basemap (openfreemap.org) -- no API key/signup needed,
 // which matters for a project meant to run out of the box.
@@ -1147,75 +1155,69 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
 // request nobody asked for on every page load would be rude to Open-Meteo
 // and confusing on a dead connection.
 
-function writeUrlState(opts: { mode: "plume" | "exchange" | "ensemble"; tier?: 0 | 1 }): void {
-  const params = new URLSearchParams();
-  params.set("mode", opts.mode);
-  params.set("yield_mt", yieldInput.value);
-  params.set("ff", ffInput.value);
-  if (opts.mode !== "exchange") {
-    params.set("lat", latInput.value);
-    params.set("lon", lonInput.value);
-  }
-  if (opts.mode === "plume") {
-    params.set("tier", String(opts.tier ?? 0));
-    if (manualWindCheckbox.checked) {
-      // speed,bearing,shear -- one param keeps the URL short
-      params.set(
-        "wind",
-        [windSpeedInput.value, windBearingInput.value, windShearInput.value].join(","),
-      );
-    }
-  }
-  if (opts.mode === "ensemble") {
-    params.set("level", ensembleLevelInput.value);
-    params.set("members", ensembleMembersInput.value);
-  }
+// Serialize/parse live in urlstate.ts (tested there); these two functions are
+// just the bridge to the form.
+
+function writeUrlState(opts: { mode: UrlMode; tier?: 0 | 1 }): void {
+  const params = buildUrlParams({
+    mode: opts.mode,
+    yieldMt: yieldInput.value,
+    ff: ffInput.value,
+    lat: latInput.value,
+    lon: lonInput.value,
+    tier: opts.tier,
+    wind: manualWindCheckbox.checked
+      ? {
+          speed: Number(windSpeedInput.value),
+          bearing: Number(windBearingInput.value),
+          shear: Number(windShearInput.value),
+        }
+      : undefined,
+    level: ensembleLevelInput.value,
+    members: ensembleMembersInput.value,
+  });
   history.replaceState(null, "", `?${params}`);
 }
 
 function readUrlState(): void {
-  const params = new URLSearchParams(window.location.search);
-  if (!params.has("mode")) return;
-  const setIfFinite = (input: HTMLInputElement, key: string) => {
-    const v = Number(params.get(key));
-    if (params.has(key) && Number.isFinite(v)) input.value = params.get(key)!;
+  const state = parseUrlParams(window.location.search);
+  if (!state) return;
+  const setIfPresent = (input: HTMLInputElement, v: string | undefined) => {
+    if (v !== undefined) input.value = v;
   };
-  setIfFinite(yieldInput, "yield_mt");
-  setIfFinite(ffInput, "ff");
-  if (params.get("mode") === "exchange") {
+  setIfPresent(yieldInput, state.yieldMt);
+  setIfPresent(ffInput, state.ff);
+  if (state.mode === "exchange") {
     setMode(true);
     return;
   }
-  setIfFinite(latInput, "lat");
-  setIfFinite(lonInput, "lon");
-  if (params.get("mode") === "ensemble") {
+  setIfPresent(latInput, state.lat);
+  setIfPresent(lonInput, state.lon);
+  if (state.mode === "ensemble") {
     ensembleModeCheckbox.checked = true;
     ensembleFields.hidden = false;
-    setIfFinite(ensembleLevelInput, "level");
-    setIfFinite(ensembleMembersInput, "members");
+    setIfPresent(ensembleLevelInput, state.level);
+    setIfPresent(ensembleMembersInput, state.members);
     setAdvanced(true); // the ensemble controls live behind the disclosure
     updateComputeButtonText();
     return;
   }
-  const tier = params.get("tier");
-  if (tier === "0" || tier === "1") {
-    const radio = form.querySelector<HTMLInputElement>(`input[name="tier"][value="${tier}"]`);
+  if (state.tier !== undefined) {
+    const radio = form.querySelector<HTMLInputElement>(
+      `input[name="tier"][value="${state.tier}"]`,
+    );
     if (radio) radio.checked = true;
     // A shared link with the non-default model should show that choice, not
     // hide it behind the collapsed advanced section.
-    if (tier === "1") setAdvanced(true);
+    if (state.tier === 1) setAdvanced(true);
   }
-  const windParam = params.get("wind");
-  if (windParam) {
-    const [speed, bearing, shear] = windParam.split(",").map(Number);
-    if ([speed, bearing, shear].every(Number.isFinite)) {
-      manualWindCheckbox.checked = true;
-      manualWindFields.hidden = false;
-      windSpeedInput.value = String(speed);
-      windBearingInput.value = String(bearing);
-      windShearInput.value = String(shear);
-      setAdvanced(true);
-    }
+  if (state.wind) {
+    manualWindCheckbox.checked = true;
+    manualWindFields.hidden = false;
+    windSpeedInput.value = String(state.wind.speed);
+    windBearingInput.value = String(state.wind.bearing);
+    windShearInput.value = String(state.wind.shear);
+    setAdvanced(true);
   }
 }
 
@@ -1960,126 +1962,10 @@ function renderExposure(resp: PointExposureResponse): void {
 
 let exportGeoJson: GeoJsonFeatureCollection | null = null;
 
-interface ReachRow {
-  label: string;
-  km: number;
-  bearingDeg: number;
-}
-
-interface ExportReport {
-  mode: "plume" | "ensemble" | "exchange";
-  title: string;
-  generatedIso: string;
-  facts: [string, string][]; // ordered label/value assumption pairs
-  displayTime?: string; // plume: the decay time the exported contours are at
-  reachCaption?: string;
-  reach?: ReachRow[];
-  yieldPolicy?: YieldPolicy; // envelope: per-class attacker yields
-  notes: string[];
-  disclaimer: string;
-}
-
 let exportReport: ExportReport | null = null;
-
-const UNITS_NOTE =
-  "Units: distances shown in both km and mi; dose rate in R/hr (roentgen/hour, " +
-  "~rem/hr whole-body); accumulated dose in R (1 R ≈ 10 mSv effective, whole-body " +
-  "gamma); times are hours after burst (H+1 = one hour after detonation).";
-
-function fmtLonLat(gz: [number, number]): string {
-  return `${gz[1].toFixed(4)}, ${gz[0].toFixed(4)} (lat, lon)`;
-}
 
 function reachRowPlain(r: ContourRow): ReachRow {
   return { label: r.label, km: r.km, bearingDeg: r.bearing };
-}
-
-function weatherFactStr(w: WeatherProvenance): string {
-  const age = w.age_seconds != null ? `, fetched ${describeAge(w.age_seconds)}` : "";
-  return `${w.model}, valid ${w.valid_time}Z${age}`;
-}
-
-function round1(v: number): number {
-  return Math.round(v * 10) / 10;
-}
-
-// Structured, self-describing metadata block embedded in the exported GeoJSON.
-function exportMetadata(r: ExportReport): Record<string, unknown> {
-  return {
-    generated: r.generatedIso,
-    app: `FalloutCast ${__APP_VERSION__}`,
-    api_url: __API_URL__,
-    mode: r.mode,
-    title: r.title,
-    assumptions: Object.fromEntries(r.facts),
-    ...(r.displayTime ? { display_time: r.displayTime } : {}),
-    ...(r.reach
-      ? {
-          contour_reach: r.reach.map((x) => ({
-            band: x.label,
-            max_reach_km: round1(x.km),
-            max_reach_mi: round1(x.km * 0.621371),
-            toward_deg: Math.round(x.bearingDeg),
-            toward_compass: compassName(x.bearingDeg),
-          })),
-        }
-      : {}),
-    ...(r.yieldPolicy ? { yield_policy: r.yieldPolicy } : {}),
-    notes: r.notes,
-    units: UNITS_NOTE,
-    disclaimer: r.disclaimer,
-  };
-}
-
-function reportMarkdown(r: ExportReport): string {
-  const lines: string[] = [];
-  lines.push(`# FalloutCast — ${r.title}`, "");
-  lines.push(`_Planning estimate, not an operational product. Generated ${r.generatedIso}._`, "");
-  lines.push(`**App:** FalloutCast ${__APP_VERSION__} · **API:** ${__API_URL__}`, "");
-  // The contours are a decay-time slice, so the report has to say which one.
-  // For a plume the time was only implicit in the reach caption; the envelope
-  // has no reach table, so without this its time went unrecorded entirely.
-  if (r.displayTime) {
-    lines.push(`**Contours shown at:** ${r.displayTime} after burst`, "");
-  }
-
-  lines.push("## Inputs & assumptions", "");
-  for (const [k, v] of r.facts) lines.push(`- **${k}:** ${v}`);
-  lines.push("");
-
-  if (r.reach && r.reach.length > 0) {
-    lines.push(`## ${r.reachCaption ?? "Contour reach"}`, "");
-    lines.push("| Band | Max reach from GZ | Toward |", "| --- | --- | --- |");
-    for (const x of r.reach) {
-      lines.push(
-        `| ${x.label} | ${formatReach(x.km)} | ${compassName(x.bearingDeg)} (${Math.round(x.bearingDeg)}°) |`,
-      );
-    }
-    lines.push("");
-  }
-
-  if (r.yieldPolicy?.assumptions?.length) {
-    lines.push("## Attack-scenario yields (per target class)", "");
-    lines.push(`Scenario: **${r.yieldPolicy.scenario}** (${r.yieldPolicy.mode}). Illustrative attacker assumptions, not the targets' own weapons.`, "");
-    lines.push("| Class | Nominal | Range | Fission |", "| --- | --- | --- | --- |");
-    for (const a of r.yieldPolicy.assumptions) {
-      lines.push(
-        `| ${a.category} | ${a.yield_mt} Mt | ${a.yield_min_mt}–${a.yield_max_mt} Mt | ${a.fission_fraction} |`,
-      );
-    }
-    lines.push("", `_${r.yieldPolicy.surface_burst_caveat}_`, "");
-  }
-
-  if (r.notes.length > 0) {
-    lines.push("## Notes", "");
-    for (const n of r.notes) lines.push(`- ${n}`);
-    lines.push("");
-  }
-
-  lines.push("## Units & limitations", "");
-  lines.push(UNITS_NOTE, "");
-  lines.push(r.disclaimer, "");
-  return lines.join("\n");
 }
 
 function downloadBlob(text: string, filename: string, mime: string): void {
