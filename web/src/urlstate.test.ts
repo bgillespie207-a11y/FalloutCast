@@ -86,6 +86,19 @@ describe("round trip", () => {
       mode: "exchange",
       yieldMt: "0.3",
       ff: "0.5",
+      agg: "max_single_source",
+    });
+  });
+
+  it("restores a summed-overlap envelope", () => {
+    // Aggregation changes what the contours MEAN (screening envelope vs
+    // simultaneous total), so a link that dropped it would reopen showing a
+    // different quantity under the same view.
+    expect(roundTrip({ mode: "exchange", yieldMt: "0.3", ff: "0.5", agg: "sum" })).toEqual({
+      mode: "exchange",
+      yieldMt: "0.3",
+      ff: "0.5",
+      agg: "sum",
     });
   });
 
@@ -130,6 +143,21 @@ describe("parseUrlParams", () => {
       bearing: 270,
       shear: 3,
     });
+  });
+
+  it("defaults an envelope link with no/unknown aggregation to the screening one", () => {
+    // The screening envelope is what this mode has always computed, and it's
+    // the conservative reading: an envelope, not a claimed total.
+    expect(parseUrlParams("?mode=exchange")!.agg).toBeUndefined();
+    expect(parseUrlParams("?mode=exchange&agg=average")!.agg).toBeUndefined();
+    expect(buildUrlParams({ mode: "exchange", yieldMt: "1", ff: "0.5" }).get("agg")).toBe(
+      "max_single_source",
+    );
+  });
+
+  it("keeps aggregation out of single-location links, where it means nothing", () => {
+    expect(buildUrlParams({ ...plume, agg: "sum" }).get("agg")).toBeNull();
+    expect(parseUrlParams("?mode=plume&agg=sum")!.agg).toBeUndefined();
   });
 
   it("ignores plume-only params on an envelope link", () => {

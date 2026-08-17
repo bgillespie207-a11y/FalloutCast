@@ -26,7 +26,11 @@ export interface UrlState {
   wind?: ManualWindState; // plume mode, manual wind only
   level?: string; // ensemble mode
   members?: string;
+  agg?: EnvelopeAggregation; // exchange mode
 }
+
+/** Mirrors the API's `aggregation` query parameter. */
+export type EnvelopeAggregation = "max_single_source" | "sum";
 
 /** What comes back OUT of one. Every field is optional because a link may be
  * hand-edited or truncated: anything missing or non-numeric is dropped rather
@@ -41,6 +45,7 @@ export interface ParsedUrlState {
   wind?: ManualWindState;
   level?: string;
   members?: string;
+  agg?: EnvelopeAggregation;
 }
 
 export function buildUrlParams(state: UrlState): URLSearchParams {
@@ -49,8 +54,12 @@ export function buildUrlParams(state: UrlState): URLSearchParams {
   params.set("yield_mt", state.yieldMt);
   params.set("ff", state.ff);
   // The national envelope has no single ground zero, so lat/lon would be
-  // meaningless noise in its link.
-  if (state.mode !== "exchange") {
+  // meaningless noise in its link. Its aggregation, on the other hand, changes
+  // what the numbers MEAN (screening envelope vs summed total), so a link that
+  // dropped it would reopen showing a different quantity under the same view.
+  if (state.mode === "exchange") {
+    params.set("agg", state.agg ?? "max_single_source");
+  } else {
     params.set("lat", state.lat ?? "");
     params.set("lon", state.lon ?? "");
   }
@@ -83,7 +92,11 @@ export function parseUrlParams(search: string): ParsedUrlState | null {
 
   state.yieldMt = numeric("yield_mt");
   state.ff = numeric("ff");
-  if (mode === "exchange") return state; // the rest doesn't apply
+  if (mode === "exchange") {
+    const agg = params.get("agg");
+    if (agg === "sum" || agg === "max_single_source") state.agg = agg;
+    return state; // the rest doesn't apply
+  }
 
   state.lat = numeric("lat");
   state.lon = numeric("lon");

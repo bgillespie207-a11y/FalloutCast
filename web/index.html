@@ -270,9 +270,37 @@
               </p>
             </details>
           </div>
+          <!-- Envelope-only. The API has always supported both aggregations
+          but the UI hardcoded max_single_source, so the other was unreachable.
+          Each option states what it is and is not, in the API's own terms. -->
+          <fieldset id="aggregation-fields" hidden>
+            <legend>How overlapping plumes combine</legend>
+            <label class="radio"
+              ><input type="radio" name="aggregation" value="max_single_source" checked />
+              Worst single source <span class="term">(screening envelope)</span></label
+            >
+            <label class="radio"
+              ><input type="radio" name="aggregation" value="sum" /> Sum of
+              overlaps <span class="term">(simultaneous total)</span></label
+            >
+            <details class="help">
+              <summary>Which should I use?</summary>
+              <p>
+                <strong>Worst single source</strong> shows, at each point, the
+                highest H+1 dose rate any <em>one</em> target could produce
+                there. It is a screening envelope — where fallout could be bad —
+                and deliberately <em>not</em> a combined total.
+                <strong>Sum of overlaps</strong> adds the contributions of every
+                target at each point, which is higher wherever plumes overlap.
+                It assumes every target is struck at the same moment and does
+                not time-align arrivals, so treat it as an upper bound rather
+                than a forecast.
+              </p>
+            </details>
+          </fieldset>
           <p id="per-class-note" class="hint" hidden>
-            Computes a max-single-source surface-burst fallout envelope across
-            the curated target deck.
+            Computes a surface-burst fallout envelope across the curated target
+            deck, combined as selected above.
             The envelope uses an attack <em>scenario</em>: assumed incoming yields per
             target class (counterforce ~0.30 Mt, countervalue ~0.50 Mt) —
             illustrative attacker assumptions, not the target's own weapon.

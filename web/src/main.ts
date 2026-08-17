@@ -11,6 +11,7 @@ import {
   geocodeZip,
   geocodePlace,
   ApiError,
+  type Aggregation,
   type ManualWind,
   type PlumeResponse,
   type PointExposureResponse,
@@ -189,6 +190,7 @@ const modePanel = document.getElementById("mode-panel") as HTMLElement;
 const singleTargetFields = document.getElementById("single-target-fields") as HTMLElement;
 const globalYieldFields = document.getElementById("global-yield-fields") as HTMLElement;
 const perClassNote = document.getElementById("per-class-note") as HTMLElement;
+const aggregationFields = document.getElementById("aggregation-fields") as HTMLFieldSetElement;
 const yieldInput = document.getElementById("yield_mt") as HTMLInputElement;
 const ffInput = document.getElementById("fission_fraction") as HTMLInputElement;
 const manualWindCheckbox = document.getElementById("manual-wind") as HTMLInputElement;
@@ -612,6 +614,14 @@ for (const el of [
 for (const el of [manualWindCheckbox, ...form.querySelectorAll<HTMLInputElement>('input[name="tier"]')]) {
   el.addEventListener("change", markResultsStale);
 }
+// Aggregation is the one exchange-mode control that changes what the envelope
+// computes, so unlike the yield/wind inputs (which it ignores) it CAN leave a
+// result on screen that no longer matches the form.
+for (const el of form.querySelectorAll<HTMLInputElement>('input[name="aggregation"]')) {
+  el.addEventListener("change", () => {
+    if (exchangeMode && exportGeoJson) staleNoteEl.hidden = false;
+  });
+}
 
 ensembleModeCheckbox.addEventListener("change", () => {
   newComputeToken(); // invalidate any in-flight compute for the previous mode
@@ -623,6 +633,13 @@ ensembleModeCheckbox.addEventListener("change", () => {
   statusEl.textContent = "";
   statusEl.classList.remove("error");
 });
+
+/** The selected envelope aggregation. Defaults to the screening envelope,
+ * which is what the mode has always computed. */
+function aggregationFromForm(): Aggregation {
+  const checked = form.querySelector<HTMLInputElement>('input[name="aggregation"]:checked');
+  return checked?.value === "sum" ? "sum" : "max_single_source";
+}
 
 /** Returns the manual wind to send, or null if the override is off.
  * Throws ApiError on out-of-range values (mirrors the API's own bounds in
@@ -735,6 +752,7 @@ function setMode(exchange: boolean): void {
   // per-target-class yields server-side, so swap the input for a summary note.
   globalYieldFields.hidden = exchange;
   perClassNote.hidden = !exchange;
+  aggregationFields.hidden = !exchange;
   updateComputeButtonText();
   statusEl.textContent = "";
   statusEl.classList.remove("error");
@@ -1143,7 +1161,7 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
       // Dense H+1 level set (not the four defaults) so the decay slider can
       // relabel the envelope client-side, exactly as it does for a plume.
       fetchExchangeEnvelope(
-        "max_single_source",
+        aggregationFromForm(),
         forceRefresh,
         fetchLevelSet(ENVELOPE_TIME_MAX_HOURS),
       ),
@@ -1158,8 +1176,10 @@ async function computeExchangeEnvelope(forceRefresh = false): Promise<void> {
 
     writeUrlState({ mode: "exchange" });
     clearStaleNote(); // inputs now match the result on screen
+    const aggName =
+      resp.aggregation === "sum" ? "Summed-overlap" : "Max-single-source";
     statusEl.textContent =
-      `Max-single-source envelope across ${resp.n_targets} ${resp.n_targets === 1 ? "target" : "targets"}.`;
+      `${aggName} envelope across ${resp.n_targets} ${resp.n_targets === 1 ? "target" : "targets"}.`;
     renderWeather(resp.weather); // valid hour + staleness live here now
     renderPlainNotes(resp.notes);
     // Full provenance (weather, aggregation, yield policy, deck version/hash,
@@ -1245,6 +1265,7 @@ function writeUrlState(opts: { mode: UrlMode; tier?: 0 | 1 }): void {
       : undefined,
     level: ensembleLevelInput.value,
     members: ensembleMembersInput.value,
+    agg: aggregationFromForm(),
   });
   history.replaceState(null, "", `?${params}`);
 }
@@ -1258,6 +1279,12 @@ function readUrlState(): void {
   setIfPresent(yieldInput, state.yieldMt);
   setIfPresent(ffInput, state.ff);
   if (state.mode === "exchange") {
+    if (state.agg) {
+      const radio = form.querySelector<HTMLInputElement>(
+        `input[name="aggregation"][value="${state.agg}"]`,
+      );
+      if (radio) radio.checked = true;
+    }
     setMode(true);
     return;
   }
